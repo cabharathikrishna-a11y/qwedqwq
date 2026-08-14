@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background_black_glass"
+    android:orientation="vertical"
+    android:paddingLeft="14dp"
+    android:paddingRight="14dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp"
+    android:gravity="center_vertical">
+
+    <TextView
+        android:id="@+id/focus_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Today"
+        android:textColor="#A1A1AA"
+        android:textSize="13sp"
+        android:textStyle="normal" />
+
+    <TextView
+        android:id="@+id/focus_time_display"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="0m"
+        android:textColor="#FF3B30"
+        android:textSize="32sp"
+        android:textStyle="bold"
+        android:includeFontPadding="false"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="6dp" />
+
+    <ImageView
+        android:id="@+id/focus_timeline_canvas"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scaleType="fitCenter"
+        android:adjustViewBounds="true"
+        android:contentDescription="Focus Timeline" />
+
+</LinearLayout>

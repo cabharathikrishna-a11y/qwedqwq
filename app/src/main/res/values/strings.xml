@@ -1,0 +1,39 @@
+<resources>
+    <string name="app_name">Life OS</string>
+    <string name="accessibility_service_desc">Required to monitor active social apps and block addictive elements like Reels, Shorts, Spotlight, and Stories to keep you focused.</string>
+    
+    <!-- Firebase standard resource keys for auto-initialization -->
+    <string name="google_app_id">1:432934819080:android:919f6a7b8f1a2a56bcc8bd</string>
+    <string name="google_api_key">AIzaSyAzHCPmTOmkFV3i7-TJ7E4GMBiA9NIIn3I</string>
+    <string name="firebase_database_url">https://lifeosca.asia-southeast1.firebasedatabase.app/</string>
+    <string name="project_id">lifeosca</string>
+    <string name="gcm_defaultSenderId">432934819080</string>
+    <string name="default_web_client_id">432934819080-jn72ep6smqj8r4q46jj1gjqchepi91ue.apps.googleusercontent.com</string>
+
+    <!-- FCM Localization & Messaging String Resources -->
+    <string name="welcome_title">Welcome, %1$s!</string>
+    <string name="new_message_body">You have %1$d new message(s) from %2$s.</string>
+    <string name="new_chat_message_title">New message from %1$s</string>
+    <string name="new_chat_message_body">%1$s</string>
+    <string name="fcm_notification_channel_name">Community Chat</string>
+    <string name="fcm_notification_channel_desc">Notifications for community chat and direct messages</string>
+
+    <!-- Widget Provider Labels & Descriptions -->
+    <string name="widget_name_total_focus">Total Focus Time</string>
+    <string name="widget_desc_total_focus">Track your daily focus stats and today\'s total focus time</string>
+
+    <string name="widget_name_stopwatch">Stopwatch Timer</string>
+    <string name="widget_desc_stopwatch">Interactive stopwatch with start, pause, and log controls</string>
+
+    <string name="widget_name_pomodoro">Pomodoro Timer</string>
+    <string name="widget_desc_pomodoro">Focus and break Pomodoro timer controls on your home screen</string>
+
+    <string name="widget_name_friends_focus">Friends Focus</string>
+    <string name="widget_desc_friends_focus">See live focus activity of your friends and study group</string>
+
+    <string name="widget_name_photo_shower">Journal Photo Shower</string>
+    <string name="widget_desc_photo_shower">Displays random journal photos with DD/MM/YY date overlay and journal notes</string>
+
+    <string name="widget_name_quick_shortcuts">Web Apps &amp; Shortcuts</string>
+    <string name="widget_desc_quick_shortcuts">1-tap shortcuts to Instagram, YouTube, Spotify, Notes, and Tasks</string>
+</resources>

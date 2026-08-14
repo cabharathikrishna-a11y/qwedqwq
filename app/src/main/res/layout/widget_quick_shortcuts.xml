@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background_black_glass"
+    android:orientation="horizontal"
+    android:padding="8dp"
+    android:gravity="center">
+
+    <!-- Instagram Shortcut -->
+    <LinearLayout
+        android:id="@+id/btn_shortcut_instagram"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:clickable="true"
+        android:focusable="true"
+        android:padding="4dp">
+
+        <ImageView
+            android:id="@+id/img_shortcut_instagram"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="Instagram" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Instagram"
+            android:textColor="#E4E4E7"
+            android:textSize="9sp"
+            android:maxLines="1"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+    <!-- YouTube Shortcut -->
+    <LinearLayout
+        android:id="@+id/btn_shortcut_youtube"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:clickable="true"
+        android:focusable="true"
+        android:padding="4dp">
+
+        <ImageView
+            android:id="@+id/img_shortcut_youtube"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="YouTube" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="YouTube"
+            android:textColor="#E4E4E7"
+            android:textSize="9sp"
+            android:maxLines="1"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+    <!-- Spotify Shortcut -->
+    <LinearLayout
+        android:id="@+id/btn_shortcut_spotify"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:clickable="true"
+        android:focusable="true"
+        android:padding="4dp">
+
+        <ImageView
+            android:id="@+id/img_shortcut_spotify"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="Spotify" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Spotify"
+            android:textColor="#E4E4E7"
+            android:textSize="9sp"
+            android:maxLines="1"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+    <!-- Keep Notes Shortcut -->
+    <LinearLayout
+        android:id="@+id/btn_shortcut_notes"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:clickable="true"
+        android:focusable="true"
+        android:padding="4dp">
+
+        <ImageView
+            android:id="@+id/img_shortcut_notes"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="Notes" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Notes"
+            android:textColor="#E4E4E7"
+            android:textSize="9sp"
+            android:maxLines="1"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+    <!-- Tasks Shortcut -->
+    <LinearLayout
+        android:id="@+id/btn_shortcut_tasks"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:clickable="true"
+        android:focusable="true"
+        android:padding="4dp">
+
+        <ImageView
+            android:id="@+id/img_shortcut_tasks"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="Tasks" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tasks"
+            android:textColor="#E4E4E7"
+            android:textSize="9sp"
+            android:maxLines="1"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+    <!-- Timer Shortcut -->
+    <LinearLayout
+        android:id="@+id/btn_shortcut_timer"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:clickable="true"
+        android:focusable="true"
+        android:padding="4dp">
+
+        <ImageView
+            android:id="@+id/img_shortcut_timer"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="Timer" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Focus"
+            android:textColor="#E4E4E7"
+            android:textSize="9sp"
+            android:maxLines="1"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+</LinearLayout>
