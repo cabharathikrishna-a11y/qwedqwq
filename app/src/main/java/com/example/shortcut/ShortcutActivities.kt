@@ -72,8 +72,65 @@ class TasksShortcutActivity : Activity() {
     }
 }
 
-// Backward compatibility aliases
-typealias InstagramShortcutActivity = TimerShortcutActivity
-typealias YouTubeShortcutActivity = JournalShortcutActivity
-typealias SpotifyShortcutActivity = TasksShortcutActivity
+class InstagramShortcutActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val targetIntent = Intent(this, MainActivity::class.java).apply {
+            action = "com.example.action.OPEN_INSTAGRAM_WEB_APP"
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("NAVIGATE_TO", "INSTAGRAM_WEB_APP")
+            putExtra("OPEN_INSTAGRAM_WEB_APP", true)
+        }
+        val shortcutInfo = ShortcutInfoCompat.Builder(this, "shortcut_instagram_web")
+            .setShortLabel(getString(R.string.shortcut_instagram_short))
+            .setLongLabel(getString(R.string.shortcut_instagram_long))
+            .setIcon(IconCompat.createWithResource(this, R.drawable.ic_instagram_shortcut))
+            .setIntent(targetIntent)
+            .build()
+        val resultIntent = ShortcutManagerCompat.createShortcutResultIntent(this, shortcutInfo)
+        setResult(RESULT_OK, resultIntent)
+        finish()
+    }
+}
 
+class YouTubeShortcutActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val targetIntent = Intent(this, MainActivity::class.java).apply {
+            action = "com.example.action.OPEN_YOUTUBE_WEB_APP"
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("NAVIGATE_TO", "YOUTUBE_WEB_APP")
+            putExtra("OPEN_YOUTUBE_WEB_APP", true)
+        }
+        val shortcutInfo = ShortcutInfoCompat.Builder(this, "shortcut_youtube_web")
+            .setShortLabel(getString(R.string.shortcut_youtube_short))
+            .setLongLabel(getString(R.string.shortcut_youtube_long))
+            .setIcon(IconCompat.createWithResource(this, R.drawable.ic_youtube_shortcut))
+            .setIntent(targetIntent)
+            .build()
+        val resultIntent = ShortcutManagerCompat.createShortcutResultIntent(this, shortcutInfo)
+        setResult(RESULT_OK, resultIntent)
+        finish()
+    }
+}
+
+class SpotifyShortcutActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val targetIntent = Intent(this, MainActivity::class.java).apply {
+            action = "com.example.action.OPEN_SPOTIFY_WEB_APP"
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("NAVIGATE_TO", "SPOTIFY_WEB_APP")
+            putExtra("OPEN_SPOTIFY_WEB_APP", true)
+        }
+        val shortcutInfo = ShortcutInfoCompat.Builder(this, "shortcut_spotify_web")
+            .setShortLabel(getString(R.string.shortcut_spotify_short))
+            .setLongLabel(getString(R.string.shortcut_spotify_long))
+            .setIcon(IconCompat.createWithResource(this, R.drawable.ic_spotify_shortcut))
+            .setIntent(targetIntent)
+            .build()
+        val resultIntent = ShortcutManagerCompat.createShortcutResultIntent(this, shortcutInfo)
+        setResult(RESULT_OK, resultIntent)
+        finish()
+    }
+}

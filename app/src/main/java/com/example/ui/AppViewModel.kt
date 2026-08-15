@@ -3858,6 +3858,54 @@ class AppViewModel(
         _selectedTaskId.value = null
     }
 
+    private val _selectedNoteId = MutableStateFlow<Int?>(null)
+    val selectedNoteId: StateFlow<Int?> = _selectedNoteId.asStateFlow()
+
+    fun selectNote(id: Int?) {
+        _selectedNoteId.value = id
+        navigateTo(Screen.KEEP_NOTES)
+    }
+
+    fun clearSelectedNoteId() {
+        _selectedNoteId.value = null
+    }
+
+    private val _selectedHabitId = MutableStateFlow<Int?>(null)
+    val selectedHabitId: StateFlow<Int?> = _selectedHabitId.asStateFlow()
+
+    fun selectHabit(id: Int?) {
+        _selectedHabitId.value = id
+        navigateTo(Screen.HABITS)
+    }
+
+    fun clearSelectedHabitId() {
+        _selectedHabitId.value = null
+    }
+
+    private val _selectedFinanceTransactionId = MutableStateFlow<Int?>(null)
+    val selectedFinanceTransactionId: StateFlow<Int?> = _selectedFinanceTransactionId.asStateFlow()
+
+    fun selectFinanceTransaction(id: Int?) {
+        _selectedFinanceTransactionId.value = id
+        navigateTo(Screen.FINANCES)
+    }
+
+    fun clearSelectedFinanceTransactionId() {
+        _selectedFinanceTransactionId.value = null
+    }
+
+    private val _selectedCountdownId = MutableStateFlow<Int?>(null)
+    val selectedCountdownId: StateFlow<Int?> = _selectedCountdownId.asStateFlow()
+
+    fun selectCountdown(id: Int?) {
+        _selectedCountdownId.value = id
+        navigateTo(Screen.COUNTDOWN)
+    }
+
+    fun clearSelectedCountdownId() {
+        _selectedCountdownId.value = null
+    }
+
     private val _selectedSyllabusSubjectCode = MutableStateFlow<String?>(null)
     val selectedSyllabusSubjectCode: StateFlow<String?> = _selectedSyllabusSubjectCode.asStateFlow()
 
@@ -4448,6 +4496,16 @@ class AppViewModel(
     val isBellSilentModeEnabled: StateFlow<Boolean> = FocusTimerManager.isBellSilentModeEnabled
     val timerAutoStartBreak: StateFlow<Boolean> = FocusTimerManager.autoStartBreak
     val timerAutoStartPomo: StateFlow<Boolean> = FocusTimerManager.autoStartPomo
+    val isMinusTimerActive: StateFlow<Boolean> = FocusTimerManager.isMinusTimerActive
+    val minusTimerSeconds: StateFlow<Int> = FocusTimerManager.minusTimerSeconds
+
+    fun startBreakFromMinusTimer() {
+        FocusTimerManager.startBreakFromMinusTimer(getApplication())
+    }
+
+    fun endMinusTimerSession() {
+        FocusTimerManager.endMinusTimerSession(getApplication())
+    }
 
     fun setTimerSoundEnabled(enabled: Boolean) {
         FocusTimerManager.setSoundEnabled(getApplication(), enabled)

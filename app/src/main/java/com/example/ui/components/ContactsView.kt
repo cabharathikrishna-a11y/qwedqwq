@@ -110,7 +110,7 @@ fun ContactsView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     var customDateValueDraft by remember { mutableStateOf("") }
 
     val externalSelectedId by viewModel.selectedContactId.collectAsState()
-    LaunchedEffect(externalSelectedId) {
+    LaunchedEffect(externalSelectedId, contacts) {
         externalSelectedId?.let { idVal ->
             val found = contacts.find { it.id == idVal }
             if (found != null) {

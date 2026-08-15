@@ -16,7 +16,7 @@
         android:contentDescription="Journal Photo" />
 
     <!-- Dark gradient shadow overlay at bottom for maximum title readability -->
-    <View
+    <FrameLayout
         android:id="@+id/photo_bottom_shadow"
         android:layout_width="match_parent"
         android:layout_height="85dp"
@@ -35,8 +35,10 @@
         android:layout_marginLeft="10dp"
         android:layout_marginStart="10dp"
         android:background="#C0000000"
-        android:paddingHorizontal="8dp"
-        android:paddingVertical="4dp">
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
 
         <TextView
             android:id="@+id/photo_shower_date"
@@ -62,7 +64,7 @@
         android:layout_marginEnd="8dp"
         android:background="#90000000"
         android:padding="6dp"
-        android:src="@android:drawable/ic_popup_sync"
+        android:src="@drawable/ic_widget_refresh"
         android:contentDescription="Next Photo" />
 
     <!-- Bottom Caption Layout for Journal Details -->
@@ -180,8 +182,10 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:background="@drawable/widget_button_background"
-            android:paddingHorizontal="10dp"
-            android:paddingVertical="4dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
             android:text="Tap to Retry"
             android:textColor="#FFFFFF"
             android:textSize="10sp"

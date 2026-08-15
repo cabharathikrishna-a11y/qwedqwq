@@ -2,7 +2,9 @@ package com.example.util
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
@@ -589,29 +591,30 @@ object PersistentWebMediaManager {
 
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val urlStr = request?.url?.toString()?.lowercase() ?: ""
-                    if (urlStr.contains("/download") ||
-                        urlStr.contains("spotify.com/download") ||
-                        urlStr.contains("play.google.com") ||
+                    if (urlStr.contains("play.google.com") ||
                         urlStr.contains("apps.apple.com") ||
                         urlStr.contains("itunes.apple.com") ||
-                        urlStr.contains("spotify.link") ||
-                        urlStr.startsWith("market://") ||
-                        urlStr.startsWith("spotify:")
+                        urlStr.startsWith("market://")
                     ) {
                         return true
+                    }
+                    if (urlStr.startsWith("spotify:")) {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlStr)).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            context.startActivity(intent)
+                            return true
+                        } catch (_: Exception) {}
                     }
                     return super.shouldOverrideUrlLoading(view, request)
                 }
 
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val reqUrl = request?.url?.toString()?.lowercase() ?: ""
-                    if (reqUrl.contains("/download") || reqUrl.contains("spotify.com/download") || reqUrl.contains("spotify.link")) {
-                        return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
-                    }
-                    if (reqUrl.contains("audio-fa.scdn.co") || reqUrl.contains("audio-ak.spotify.com") || reqUrl.contains("audio4-ak.spotify.com")) {
-                        return super.shouldInterceptRequest(view, request)
-                    }
-                    if (reqUrl.contains("googleads") || reqUrl.contains("doubleclick") || reqUrl.contains("googlesyndication") || reqUrl.contains("adservice.google")) {
+                    if (reqUrl.contains("doubleclick.net") || reqUrl.contains("googlesyndication.com") ||
+                        reqUrl.contains("pagead2.googlesyndication.com") || reqUrl.contains("adservice.google") ||
+                        reqUrl.contains("scorecardresearch.com")) {
                         return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
                     }
                     return super.shouldInterceptRequest(view, request)
@@ -679,13 +682,59 @@ object PersistentWebMediaManager {
                     configurable: true
                 });
 
+                // Polyfill EME (Encrypted Media Extensions) for Spotify Widevine Protected Content
+                if (!navigator.requestMediaKeySystemAccess || !window.__spotifyEmeShimmed) {
+                    window.__spotifyEmeShimmed = true;
+                    var origReq = navigator.requestMediaKeySystemAccess;
+                    navigator.requestMediaKeySystemAccess = function(keySystem, supportedConfigurations) {
+                        if (keySystem === 'com.widevine.alpha' || keySystem === 'org.w3.clearkey' || (keySystem && keySystem.indexOf('widevine') !== -1)) {
+                            return Promise.resolve({
+                                keySystem: keySystem,
+                                createMediaKeys: function() {
+                                    return Promise.resolve({
+                                        createSession: function() {
+                                            return {
+                                                generateRequest: function() { return Promise.resolve(); },
+                                                load: function() { return Promise.resolve(true); },
+                                                update: function() { return Promise.resolve(); },
+                                                close: function() { return Promise.resolve(); },
+                                                remove: function() { return Promise.resolve(); },
+                                                closed: new Promise(function() {}),
+                                                keyStatuses: new Map(),
+                                                addEventListener: function() {},
+                                                removeEventListener: function() {},
+                                                dispatchEvent: function() { return true; }
+                                            };
+                                        },
+                                        setServerCertificate: function() { return Promise.resolve(true); }
+                                    });
+                                },
+                                getConfiguration: function() {
+                                    return (supportedConfigurations && supportedConfigurations[0]) || {
+                                        initDataTypes: ['cenc', 'keyids', 'webm'],
+                                        audioCapabilities: [
+                                            { contentType: 'audio/mp4; codecs="mp4a.40.2"' },
+                                            { contentType: 'audio/webm; codecs="opus"' }
+                                        ]
+                                    };
+                                }
+                            });
+                        }
+                        if (origReq) return origReq.apply(navigator, arguments);
+                        return Promise.reject(new Error('Unsupported keySystem'));
+                    };
+                }
+
                 if (navigator.mediaCapabilities) {
                     navigator.mediaCapabilities.decodingInfo = function(config) {
                         return Promise.resolve({
                             supported: true,
                             smooth: true,
                             powerEfficient: true,
-                            keySystemAccess: null
+                            keySystemAccess: {
+                                keySystem: 'com.widevine.alpha',
+                                createMediaKeys: function() { return Promise.resolve({}); }
+                            }
                         });
                     };
                 }
@@ -693,7 +742,7 @@ object PersistentWebMediaManager {
                 if (window.MediaSource && MediaSource.isTypeSupported) {
                     var origIsType = MediaSource.isTypeSupported;
                     MediaSource.isTypeSupported = function(t) {
-                        if (t && (t.includes('audio') || t.includes('webm') || t.includes('mp4') || t.includes('aac') || t.includes('opus') || t.includes('ogg'))) {
+                        if (t && (t.includes('audio') || t.includes('webm') || t.includes('mp4') || t.includes('aac') || t.includes('opus') || t.includes('ogg') || t.includes('mpeg'))) {
                             return true;
                         }
                         return origIsType ? origIsType.call(MediaSource, t) : true;
@@ -770,7 +819,10 @@ object PersistentWebMediaManager {
                         #unsupported-browser,
                         div[class*="UnsupportedBrowser"],
                         div[class*="unsupportedBrowser"],
-                        div[class*="Unsupported"] {
+                        div[class*="Unsupported"],
+                        div[class*="ProtectedContent"],
+                        div[class*="protectedContent"],
+                        div[class*="EmeError"] {
                             display: none !important;
                             visibility: hidden !important;
                             height: 0 !important;
@@ -810,7 +862,7 @@ object PersistentWebMediaManager {
                             window.SpotifyTrackBridge.updateTrackInfo(title, artist, coverUrl, isPlaying, 0, 0);
                         }
                     } catch(err) {}
-                }, 1000);
+                }, 1500);
             }
         })();
         """.trimIndent()

@@ -416,7 +416,7 @@ fun JournalBookView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     val monthlyListState = rememberLazyListState(initialFirstVisibleItemIndex = 60)
 
     val extSelectedJournalId by viewModel.selectedJournalId.collectAsState()
-    LaunchedEffect(extSelectedJournalId) {
+    LaunchedEffect(extSelectedJournalId, entries) {
         extSelectedJournalId?.let { idVal ->
             val entry = entries.find { it.id == idVal }
             if (entry != null) {

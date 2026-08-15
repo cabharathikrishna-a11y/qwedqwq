@@ -4671,7 +4671,12 @@ fun TimerImmersiveContent(
                 )
             }
 
-            val currentSeconds = if (!isFocusPhase) {
+            val isMinusTimerActive by viewModel.isMinusTimerActive.collectAsStateWithLifecycle()
+            val minusTimerSeconds by viewModel.minusTimerSeconds.collectAsStateWithLifecycle()
+
+            val currentSeconds = if (isMinusTimerActive) {
+                minusTimerSeconds
+            } else if (!isFocusPhase) {
                 timerSecondsRemaining
             } else if (isTabFocusTimerSelected) {
                 timerSecondsRemaining
@@ -4679,9 +4684,21 @@ fun TimerImmersiveContent(
                 stopwatchSeconds
             }
 
-            val isBlinking = !isFocusPhase || isPaused || (isTabFocusTimerSelected && !isFocusPhase)
+            val isBlinking = !isMinusTimerActive && (!isFocusPhase || isPaused || (isTabFocusTimerSelected && !isFocusPhase))
 
-            if (timerDisplayMode == "flip") {
+            if (isMinusTimerActive) {
+                RenderDigitalDigits(
+                    viewModel = viewModel,
+                    seconds = minusTimerSeconds,
+                    isImmersive = true,
+                    isAntiBurnCenteredByTap = isAntiBurnCenteredByTap,
+                    isBlinking = false,
+                    isVerticalPhone = isVerticalPhone,
+                    isMinusTimer = true
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("FOCUS ENDED • START BREAK OR END", color = Color(0xFFEF5350), fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            } else if (timerDisplayMode == "flip") {
                 RenderFlipDigits(
                     viewModel = viewModel,
                     seconds = currentSeconds,
@@ -5184,9 +5201,11 @@ fun TimerLiveControlContent(
     val isTabFocusTimerSelected by viewModel.isTabFocusTimerSelected.collectAsStateWithLifecycle()
     val wasStartedFromStopwatch by viewModel.wasStartedFromStopwatch.collectAsStateWithLifecycle()
     val isPaused by viewModel.isPaused.collectAsStateWithLifecycle()
+    val isMinusTimerActive by viewModel.isMinusTimerActive.collectAsStateWithLifecycle()
+    val minusTimerSeconds by viewModel.minusTimerSeconds.collectAsStateWithLifecycle()
 
     val isStopwatchOnOrActive = isStopwatchActive || stopwatchSeconds > 0
-    val isTimerOnOrActive = isTimerActive || (timerSecondsRemaining < focusTimerDurationMins * 60)
+    val isTimerOnOrActive = isTimerActive || (timerSecondsRemaining < focusTimerDurationMins * 60) || isMinusTimerActive
 
     val waterReminderEnabled by viewModel.waterReminderEnabled.collectAsStateWithLifecycle()
     var soundPlayingNotification by remember { mutableStateOf<String?>(null) }
@@ -5261,7 +5280,23 @@ fun TimerLiveControlContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (isTabFocusTimerSelected || isInBreakMode) {
+                        if (isMinusTimerActive) {
+                            RenderDigitalDigits(
+                                viewModel = viewModel,
+                                seconds = minusTimerSeconds,
+                                isImmersive = isImmersive,
+                                isAntiBurnCenteredByTap = isAntiBurnCenteredByTap,
+                                isBlinking = false,
+                                isMinusTimer = true
+                            )
+                            Text(
+                                text = "FOCUS ENDED • START BREAK OR END",
+                                color = Color(0xFFEF5350),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp
+                            )
+                        } else if (isTabFocusTimerSelected || isInBreakMode) {
                             RenderDigitalDigits(
                                 viewModel = viewModel,
                                 seconds = timerSecondsRemaining,
@@ -5554,7 +5589,23 @@ fun TimerLiveControlContent(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            if (isTabFocusTimerSelected || isInBreakMode) {
+                            if (isMinusTimerActive) {
+                                RenderDigitalDigits(
+                                    viewModel = viewModel,
+                                    seconds = minusTimerSeconds,
+                                    isImmersive = isImmersive,
+                                    isAntiBurnCenteredByTap = isAntiBurnCenteredByTap,
+                                    isBlinking = false,
+                                    isMinusTimer = true
+                                )
+                                Text(
+                                    text = "FOCUS ENDED • START BREAK OR END",
+                                    color = Color(0xFFEF5350),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp
+                                )
+                            } else if (isTabFocusTimerSelected || isInBreakMode) {
                                 RenderDigitalDigits(
                                     viewModel = viewModel,
                                     seconds = timerSecondsRemaining,
@@ -5786,13 +5837,20 @@ fun RenderDigitalDigits(
     isImmersive: Boolean,
     isAntiBurnCenteredByTap: Boolean,
     isBlinking: Boolean = false,
-    isVerticalPhone: Boolean = false
+    isVerticalPhone: Boolean = false,
+    isMinusTimer: Boolean = false
 ) {
     val h = seconds / 3600
     val m = (seconds % 3600) / 60
     val s = seconds % 60
 
-    val textString = if (isImmersive) {
+    val textString = if (isMinusTimer) {
+        if (h > 0) {
+            String.format(java.util.Locale.US, "-%02d:%02d:%02d", h, m, s)
+        } else {
+            String.format(java.util.Locale.US, "-%02d:%02d", m, s)
+        }
+    } else if (isImmersive) {
         if (h > 0) {
             String.format(java.util.Locale.US, "%02d:%02d:%02d", h, m, s)
         } else {
@@ -5845,7 +5903,7 @@ fun RenderDigitalDigits(
 
     Text(
         text = textString,
-        color = Color.White,
+        color = if (isMinusTimer) Color(0xFFEF5350) else Color.White,
         fontSize = dynamicDigitalFontSize,
         fontWeight = FontWeight.Black,
         fontFamily = FontFamily.Monospace,
@@ -6541,6 +6599,7 @@ fun LiveSessionActionBar(
     val cumulativeSessionFocusSeconds by viewModel.cumulativeSessionFocusSeconds.collectAsStateWithLifecycle()
     val isTabFocusTimerSelected by viewModel.isTabFocusTimerSelected.collectAsStateWithLifecycle()
     val isCommandDevice by viewModel.isCommandDevice.collectAsStateWithLifecycle()
+    val isMinusTimerActive by viewModel.isMinusTimerActive.collectAsStateWithLifecycle()
 
     val isPausedState = isPaused || (!isRunning && isFocusPhase && (
         (wasStartedFromStopwatch && stopwatchSeconds > 0) || 
@@ -6602,7 +6661,32 @@ fun LiveSessionActionBar(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (isPausedState) {
+        if (isMinusTimerActive) {
+            // State: MINUS TIMER -> 2 Buttons: "Start Break" & "End"
+            ActionButton(
+                text = "Start Break",
+                icon = Icons.Default.FreeBreakfast,
+                containerColor = Color(0xFF2E7D32),
+                contentColor = Color.White,
+                borderColor = Color(0xFF81C784),
+                onClick = {
+                    viewModel.startBreakFromMinusTimer()
+                },
+                modifier = Modifier.weight(1.5f)
+            )
+
+            ActionButton(
+                text = "End",
+                icon = Icons.Default.Stop,
+                containerColor = Color(0xFFC62828),
+                contentColor = Color.White,
+                borderColor = Color(0xFFEF5350),
+                onClick = {
+                    viewModel.endMinusTimerSession()
+                },
+                modifier = Modifier.weight(1f)
+            )
+        } else if (isPausedState) {
             // State: PAUSED -> 2 Buttons: Resume & End
             ActionButton(
                 text = "Resume",
@@ -6846,15 +6930,53 @@ fun formatAutoDate(input: String, previous: String): String {
     }.take(10)
 }
 
+data class FestivalTemplate(val name: String, val month: Int, val day: Int)
+
+val BUILT_IN_FESTIVALS = listOf(
+    FestivalTemplate("New Year's Day", 1, 1),
+    FestivalTemplate("Makar Sankranti / Pongal", 1, 14),
+    FestivalTemplate("Republic Day", 1, 26),
+    FestivalTemplate("Maha Shivratri", 2, 15),
+    FestivalTemplate("Holi (Festival of Colors)", 3, 4),
+    FestivalTemplate("Eid ul-Fitr", 3, 20),
+    FestivalTemplate("Good Friday", 4, 3),
+    FestivalTemplate("Easter Sunday", 4, 5),
+    FestivalTemplate("Baisakhi / Vishu / Puthandu", 4, 14),
+    FestivalTemplate("Eid al-Adha (Bakrid)", 5, 27),
+    FestivalTemplate("Independence Day", 8, 15),
+    FestivalTemplate("Raksha Bandhan", 8, 28),
+    FestivalTemplate("Janmashtami", 9, 4),
+    FestivalTemplate("Ganesh Chaturthi", 9, 14),
+    FestivalTemplate("Gandhi Jayanti", 10, 2),
+    FestivalTemplate("Navratri / Durga Puja", 10, 11),
+    FestivalTemplate("Dussehra (Vijayadashami)", 10, 20),
+    FestivalTemplate("Halloween", 10, 31),
+    FestivalTemplate("Diwali (Deepavali)", 11, 8),
+    FestivalTemplate("Govardhan Puja / Bhai Dooj", 11, 10),
+    FestivalTemplate("Guru Nanak Jayanti", 11, 24),
+    FestivalTemplate("Thanksgiving", 11, 26),
+    FestivalTemplate("Christmas Day", 12, 25),
+    FestivalTemplate("New Year's Eve", 12, 31)
+)
+
 @Composable
 fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     val contacts by viewModel.contacts.collectAsState()
     val deadlines by viewModel.deadlines.collectAsState()
+    val systemCalendarEvents by viewModel.systemCalendarEvents.collectAsState()
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        viewModel.loadSystemCalendarEvents(context)
+    }
 
     var activeCategoryFilter by remember { mutableStateOf("All") }
-    val categories = listOf("All", "Birthdays", "Anniversaries", "Others")
+    val categories = listOf("All", "Festivals", "Birthdays", "Anniversaries", "Others")
+    var sortOption by remember { mutableStateOf("Soonest") }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var newEventCategory by remember { mutableStateOf("Festivals") }
     var eventName by remember { mutableStateOf("") }
     var eventDateText by remember { mutableStateOf("") } // Input is dd/mm/yyyy
 
@@ -6863,6 +6985,82 @@ fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     var detailEditMode by remember { mutableStateOf(false) }
     var detailNameEdit by remember { mutableStateOf("") }
     var detailDateEdit by remember { mutableStateOf("") }
+
+    // Dynamic Festivals derived from built-in festival list + Google Calendar / systemCalendarEvents
+    val derivedFestivalCountdowns = remember(systemCalendarEvents) {
+        val today = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val todayMillis = today.timeInMillis
+
+        // 1. Built-in major festivals
+        val builtInItems = BUILT_IN_FESTIVALS.map { fest ->
+            val cal = Calendar.getInstance().apply {
+                set(Calendar.MONTH, fest.month - 1)
+                set(Calendar.DAY_OF_MONTH, fest.day)
+                set(Calendar.YEAR, today.get(Calendar.YEAR))
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            if (cal.timeInMillis < todayMillis - 24 * 3600 * 1000L) {
+                cal.set(Calendar.YEAR, today.get(Calendar.YEAR) + 1)
+            }
+            val displayDateSdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+            val originalDateDisplay = displayDateSdf.format(cal.time)
+            CountdownItem(
+                id = "builtin_fest_${fest.name.lowercase().replace(Regex("[^a-z0-9]"), "_")}",
+                name = fest.name,
+                targetTimestamp = cal.timeInMillis,
+                category = "Festivals",
+                originalDateStr = originalDateDisplay
+            )
+        }
+
+        // 2. Dynamic Calendar Holidays from system / Google Calendar
+        val systemItems = systemCalendarEvents
+            .filter { it.isHolidayOrFestival }
+            .distinctBy { "${it.title.trim().lowercase()}_${it.dateStr}" }
+            .mapNotNull { event ->
+                val dateStr = event.dateStr
+                val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                val eventDate = try { sdf.parse(dateStr) } catch (e: Exception) { null }
+                val cal = Calendar.getInstance()
+                if (eventDate != null) {
+                    cal.time = eventDate
+                } else if (event.startMillis > 0) {
+                    cal.timeInMillis = event.startMillis
+                } else {
+                    return@mapNotNull null
+                }
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+
+                // If the festival occurred earlier in current year, move to next year for upcoming countdown
+                if (cal.timeInMillis < todayMillis - 24 * 3600 * 1000L) {
+                    cal.set(Calendar.YEAR, today.get(Calendar.YEAR) + 1)
+                }
+
+                val displayDateSdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                val originalDateDisplay = displayDateSdf.format(cal.time)
+
+                CountdownItem(
+                    id = "festival_${event.id}_${event.dateStr}",
+                    name = event.title,
+                    targetTimestamp = cal.timeInMillis,
+                    category = "Festivals",
+                    originalDateStr = originalDateDisplay
+                )
+            }
+
+        (builtInItems + systemItems).distinctBy { it.name.trim().lowercase() }
+    }
 
     // Dynamic Birthdays derived directly from Contacts DOB formatted as DD/MM/YYYY
     val derivedBirthdayCountdowns = remember(contacts) {
@@ -6946,16 +7144,19 @@ fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
         }
     }
 
-    // Database Persistent Deadlines mapped as "Others" Countdowns
+    // Database Persistent Deadlines mapped as "Others" or user-created "Festivals" Countdowns
     val derivedDeadlineCountdowns = remember(deadlines) {
         deadlines.filter { !it.isCompleted }.map { d ->
             val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
             val dateStr = sdf.format(Date(d.targetTimestamp))
+            val isFestival = d.name.startsWith("[Festival] ") || d.name.startsWith("[Festivals] ")
+            val cleanName = if (isFestival) d.name.substringAfter("] ") else d.name
+            val category = if (isFestival) "Festivals" else "Others"
             CountdownItem(
                 id = "db_deadline_${d.id}",
-                name = d.name,
+                name = cleanName,
                 targetTimestamp = d.targetTimestamp,
-                category = "Others",
+                category = category,
                 isDbBacked = true,
                 dbId = d.id,
                 originalDateStr = dateStr
@@ -6964,22 +7165,49 @@ fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     }
 
     // Combine all countdowns
-    val allCountdowns = remember(derivedBirthdayCountdowns, derivedAnniversaryCountdowns, derivedDeadlineCountdowns) {
-        derivedBirthdayCountdowns + derivedAnniversaryCountdowns + derivedDeadlineCountdowns
+    val allCountdowns = remember(derivedFestivalCountdowns, derivedBirthdayCountdowns, derivedAnniversaryCountdowns, derivedDeadlineCountdowns) {
+        derivedFestivalCountdowns + derivedBirthdayCountdowns + derivedAnniversaryCountdowns + derivedDeadlineCountdowns
     }
 
-    // Filtered countdowns based on category chip
-    val filteredCountdowns = allCountdowns.filter { item ->
-        activeCategoryFilter == "All" || item.category.equals(activeCategoryFilter, ignoreCase = true)
-    }.sortedBy { it.targetTimestamp }
+    // Deep link selection handling from Global Search
+    val extSelectedCountdownId by viewModel.selectedCountdownId.collectAsState()
+    LaunchedEffect(extSelectedCountdownId, allCountdowns) {
+        extSelectedCountdownId?.let { idVal ->
+            val item = allCountdowns.find { it.id == idVal.toString() || (it.dbId != 0 && it.dbId == idVal) }
+            if (item != null) {
+                selectedItemForDetail = item
+                detailEditMode = false
+                detailNameEdit = item.name
+                detailDateEdit = item.originalDateStr
+                viewModel.clearSelectedCountdownId()
+            }
+        }
+    }
+
+    // Filtered and Sorted countdowns
+    val filteredCountdowns = remember(allCountdowns, activeCategoryFilter, sortOption) {
+        val list = allCountdowns.filter { item ->
+            activeCategoryFilter == "All" || item.category.equals(activeCategoryFilter, ignoreCase = true)
+        }
+        when (sortOption) {
+            "Soonest" -> list.sortedBy { it.targetTimestamp }
+            "Furthest" -> list.sortedByDescending { it.targetTimestamp }
+            "Festivals First" -> list.sortedWith(compareBy({ if (it.category == "Festivals") 0 else 1 }, { it.targetTimestamp }))
+            "Birthdays First" -> list.sortedWith(compareBy({ if (it.category == "Birthdays") 0 else 1 }, { it.targetTimestamp }))
+            "Name (A-Z)" -> list.sortedBy { it.name.lowercase(Locale.ROOT) }
+            "Name (Z-A)" -> list.sortedByDescending { it.name.lowercase(Locale.ROOT) }
+            else -> list.sortedBy { it.targetTimestamp }
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
-        // Compact single-line row containing horizontally scrollable filters and the add action button
+        // Top Control Row: Categories Filters + Dedicated Sort Box + Add Button
         Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            // Horizontal scrollable category filters
             Row(
                 modifier = Modifier
                     .weight(1f)
@@ -7005,31 +7233,97 @@ fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                 }
             }
 
-
-
-            IconButton(
-                onClick = {
-                    eventName = ""
-                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                    eventDateText = sdf.format(Date(System.currentTimeMillis() + 10 * 24 * 3600 * 1000L))
-                    showAddDialog = true
-                },
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(WaterBlue)
-                    .size(36.dp)
-                    .testTag("add_countdown_btn")
+            // Right side: Dedicated Sort Box and Add Action Button
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add Countdown",
-                    tint = Color.Black,
-                    modifier = Modifier.size(20.dp)
-                )
+                // Dedicated Sort Box
+                Box {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Charcoal)
+                            .border(0.5.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .clickable { sortMenuExpanded = true }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = when (sortOption) {
+                                "Soonest" -> "⏳ Soonest"
+                                "Furthest" -> "📅 Furthest"
+                                "Festivals First" -> "🎉 Festivals"
+                                "Birthdays First" -> "🎂 Birthdays"
+                                "Name (A-Z)" -> "🔤 A → Z"
+                                "Name (Z-A)" -> "🔠 Z → A"
+                                else -> sortOption
+                            },
+                            fontSize = 11.sp,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Sort Options", tint = Color.LightGray, modifier = Modifier.size(16.dp))
+                    }
+
+                    DropdownMenu(
+                        expanded = sortMenuExpanded,
+                        onDismissRequest = { sortMenuExpanded = false },
+                        modifier = Modifier.background(SurfaceCard)
+                    ) {
+                        listOf(
+                            "Soonest" to "⏳ Soonest First",
+                            "Furthest" to "📅 Furthest First",
+                            "Festivals First" to "🎉 Festivals First",
+                            "Birthdays First" to "🎂 Birthdays First",
+                            "Name (A-Z)" to "🔤 Name (A → Z)",
+                            "Name (Z-A)" to "🔠 Name (Z → A)"
+                        ).forEach { (opt, label) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = label,
+                                        color = if (sortOption == opt) WaterBlue else Color.White,
+                                        fontWeight = if (sortOption == opt) FontWeight.Bold else FontWeight.Normal,
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                onClick = {
+                                    sortOption = opt
+                                    sortMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Add button
+                IconButton(
+                    onClick = {
+                        eventName = ""
+                        newEventCategory = if (activeCategoryFilter in listOf("Festivals", "Others", "Birthdays", "Anniversaries")) activeCategoryFilter else "Festivals"
+                        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                        eventDateText = sdf.format(Date(System.currentTimeMillis() + 10 * 24 * 3600 * 1000L))
+                        showAddDialog = true
+                    },
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(WaterBlue)
+                        .size(36.dp)
+                        .testTag("add_countdown_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add Countdown",
+                        tint = Color.Black,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
 
-        // Countdown Grid Layout
+        // Countdown Grid Layout with Uniform Display Box Sizes
         if (filteredCountdowns.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -7048,9 +7342,24 @@ fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                     val diffMs = item.targetTimestamp - System.currentTimeMillis()
                     val daysRemaining = maxOf(0, ((diffMs + 12 * 3600 * 1000L) / (24 * 3600 * 1000L)).toInt()) // robust round up of fractional day boundary
 
+                    val catBg = when (item.category) {
+                        "Festivals" -> Color(0xFFAB47BC).copy(alpha = 0.2f)
+                        "Birthdays" -> Color(0xFFEC407A).copy(alpha = 0.2f)
+                        "Anniversaries" -> Color(0xFF7E57C2).copy(alpha = 0.2f)
+                        else -> WaterBlue.copy(alpha = 0.15f)
+                    }
+                    val catText = when (item.category) {
+                        "Festivals" -> Color(0xFFCE93D8)
+                        "Birthdays" -> Color(0xFFF48FB1)
+                        "Anniversaries" -> Color(0xFFB39DDB)
+                        else -> WaterBlue
+                    }
+
+                    // Uniform Fixed-Height Display Box
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .height(172.dp)
                             .clickable {
                                 selectedItemForDetail = item
                                 detailEditMode = false
@@ -7060,8 +7369,13 @@ fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                         colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.05f)),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            // Category Tag badge
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Top Row: Category Tag badge + Category Icon & Action
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -7069,132 +7383,179 @@ fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(WaterBlue.copy(alpha = 0.12f))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(catBg)
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
-                                    Text(item.category.uppercase(), color = WaterBlue, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Text(item.category.uppercase(), color = catText, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                 }
-                                
-                                if (item.category == "Birthdays") {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Cake, contentDescription = "Synced Birthday", tint = WaterBlue, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        IconButton(
-                                            onClick = {
-                                                item.contactId?.let { cId ->
-                                                    val c = contacts.firstOrNull { it.id == cId }
-                                                    if (c != null) {
-                                                        viewModel.updateContact(c.copy(dobString = ""))
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.size(24.dp)
-                                        ) {
-                                            Icon(Icons.Default.Close, contentDescription = "Remove Birthday Countdown", tint = Color.Gray, modifier = Modifier.size(12.dp))
-                                        }
-                                    }
-                                } else if (item.category == "Anniversaries") {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Favorite, contentDescription = "Synced Anniversary", tint = WaterBlue, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        IconButton(
-                                            onClick = {
-                                                item.contactId?.let { cId ->
-                                                    val c = contacts.firstOrNull { it.id == cId }
-                                                    if (c != null) {
-                                                        viewModel.updateContact(c.copy(anniversaryString = ""))
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.size(24.dp)
-                                        ) {
-                                            Icon(Icons.Default.Close, contentDescription = "Remove Anniversary Countdown", tint = Color.Gray, modifier = Modifier.size(12.dp))
-                                        }
-                                    }
-                                } else {
-                                    IconButton(
-                                        onClick = {
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    when (item.category) {
+                                        "Festivals" -> {
+                                            Text("🎉", fontSize = 15.sp)
                                             if (item.isDbBacked) {
-                                                viewModel.deleteDeadline(Deadline(id = item.dbId, name = item.name, targetTimestamp = item.targetTimestamp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                IconButton(
+                                                    onClick = {
+                                                        viewModel.deleteDeadline(Deadline(id = item.dbId, name = item.name, targetTimestamp = item.targetTimestamp))
+                                                    },
+                                                    modifier = Modifier.size(22.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Delete", tint = Color.Gray, modifier = Modifier.size(12.dp))
+                                                }
                                             }
-                                        },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(Icons.Default.Close, contentDescription = "Delete", tint = Color.Gray, modifier = Modifier.size(12.dp))
+                                        }
+                                        "Birthdays" -> {
+                                            Text("🎂", fontSize = 15.sp)
+                                            if (item.contactId != null) {
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                IconButton(
+                                                    onClick = {
+                                                        item.contactId.let { cId ->
+                                                            val c = contacts.firstOrNull { it.id == cId }
+                                                            if (c != null) {
+                                                                viewModel.updateContact(c.copy(dobString = ""))
+                                                            }
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(22.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Remove Birthday Countdown", tint = Color.Gray, modifier = Modifier.size(12.dp))
+                                                }
+                                            }
+                                        }
+                                        "Anniversaries" -> {
+                                            Text("💍", fontSize = 15.sp)
+                                            if (item.contactId != null) {
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                IconButton(
+                                                    onClick = {
+                                                        item.contactId.let { cId ->
+                                                            val c = contacts.firstOrNull { it.id == cId }
+                                                            if (c != null) {
+                                                                viewModel.updateContact(c.copy(anniversaryString = ""))
+                                                            }
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(22.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Remove Anniversary Countdown", tint = Color.Gray, modifier = Modifier.size(12.dp))
+                                                }
+                                            }
+                                        }
+                                        else -> {
+                                            if (item.isDbBacked) {
+                                                IconButton(
+                                                    onClick = {
+                                                        viewModel.deleteDeadline(Deadline(id = item.dbId, name = item.name, targetTimestamp = item.targetTimestamp))
+                                                    },
+                                                    modifier = Modifier.size(22.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Delete", tint = Color.Gray, modifier = Modifier.size(12.dp))
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            if (item.name.contains(" (")) {
-                                val index = item.name.indexOf(" (")
-                                val mainPart = item.name.substring(0, index)
-                                val agePart = item.name.substring(index).trim()
-                                Column(modifier = Modifier.padding(bottom = 6.dp)) {
-                                    Text(
-                                        text = mainPart,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        fontSize = 15.sp
-                                    )
-                                    Text(
-                                        text = agePart,
-                                        fontWeight = FontWeight.Medium,
-                                        color = WaterBlue,
-                                        fontSize = 12.sp,
-                                        modifier = Modifier.padding(top = 2.dp)
-                                    )
-                                }
-                            } else {
-                                Text(
-                                    text = item.name,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                    modifier = Modifier.padding(bottom = 6.dp)
-                                )
-                            }
-
-                            // Countdown digits (ONLY SHOWS DAYS!)
-                            Row(
-                                verticalAlignment = Alignment.Bottom,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = "$daysRemaining",
-                                    fontSize = 32.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = WaterBlue
-                                )
-                                Text("days left", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // "Automatically deploy the bars" - Progress indication bar
-                            val progressValue = remember(daysRemaining) {
-                                if (item.category == "Birthdays" || item.category == "Anniversaries") {
-                                    val percent = (365f - daysRemaining) / 365f
-                                    maxOf(0.05f, minOf(1.0f, percent))
-                                } else {
-                                    val totalSampleDays = 30f
-                                    val percent = (totalSampleDays - daysRemaining) / totalSampleDays
-                                    maxOf(0.1f, minOf(1.0f, percent))
-                                }
-                            }
-
-                            LinearProgressIndicator(
-                                progress = progressValue,
-                                color = WaterBlue,
-                                trackColor = Color.LightGray.copy(alpha = 0.1f),
+                            // Middle: Uniform Title & Age Section (Fixed height for strict consistency)
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                            )
+                                    .height(38.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (item.name.contains(" (")) {
+                                    val index = item.name.indexOf(" (")
+                                    val mainPart = item.name.substring(0, index)
+                                    val agePart = item.name.substring(index).trim()
+                                    Column {
+                                        Text(
+                                            text = mainPart,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = agePart,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (item.category == "Birthdays") Color(0xFFF48FB1) else WaterBlue,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = item.name,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        lineHeight = 18.sp
+                                    )
+                                }
+                            }
+
+                            // Bottom: Countdown digits & Progress bar
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    verticalAlignment = Alignment.Bottom,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = "$daysRemaining",
+                                        fontSize = 28.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = when (item.category) {
+                                            "Festivals" -> Color(0xFFCE93D8)
+                                            "Birthdays" -> Color(0xFFF48FB1)
+                                            "Anniversaries" -> Color(0xFFB39DDB)
+                                            else -> WaterBlue
+                                        }
+                                    )
+                                    Text(
+                                        text = if (daysRemaining == 1) "day left" else if (daysRemaining == 0) "today!" else "days left",
+                                        color = Color.Gray,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(bottom = 3.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                val progressValue = remember(daysRemaining) {
+                                    if (item.category in listOf("Festivals", "Birthdays", "Anniversaries")) {
+                                        val percent = (365f - daysRemaining) / 365f
+                                        maxOf(0.05f, minOf(1.0f, percent))
+                                    } else {
+                                        val totalSampleDays = 30f
+                                        val percent = (totalSampleDays - daysRemaining) / totalSampleDays
+                                        maxOf(0.1f, minOf(1.0f, percent))
+                                    }
+                                }
+
+                                LinearProgressIndicator(
+                                    progress = progressValue,
+                                    color = when (item.category) {
+                                        "Festivals" -> Color(0xFFAB47BC)
+                                        "Birthdays" -> Color(0xFFEC407A)
+                                        "Anniversaries" -> Color(0xFF7E57C2)
+                                        else -> WaterBlue
+                                    },
+                                    trackColor = Color.LightGray.copy(alpha = 0.1f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                )
+                            }
                         }
                     }
                 }
@@ -7226,7 +7587,8 @@ fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                         if (eventName.isNotEmpty()) {
                             val parsedCal = parseDateStringToCalendar(eventDateText)
                             val targetTime = parsedCal?.timeInMillis ?: (System.currentTimeMillis() + 10 * 24 * 3600 * 1000L)
-                            viewModel.createDeadline(eventName, (maxOf(0L, targetTime - System.currentTimeMillis()) / (24 * 3600 * 1000L)))
+                            val finalName = if (newEventCategory == "Festivals") "[Festival] $eventName" else eventName
+                            viewModel.createDeadline(finalName, (maxOf(0L, targetTime - System.currentTimeMillis()) / (24 * 3600 * 1000L)))
                         }
                         showAddDialog = false
                     }) {
@@ -7246,14 +7608,39 @@ fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
 
         AlertDialog(
             onDismissRequest = { handleDismissAttempt() },
-            title = { Text("Add Milestone Countdown", fontWeight = FontWeight.Bold, color = Color.White) },
+            title = { Text("Add Countdown Event", fontWeight = FontWeight.Bold, color = Color.White) },
             containerColor = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.05f),
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Category Selection Chips
+                    Text("Category", color = Color.Gray, fontSize = 11.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("Festivals", "Others").forEach { cat ->
+                            val isSel = newEventCategory == cat
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) (if (cat == "Festivals") Color(0xFFAB47BC) else WaterBlue) else Charcoal)
+                                    .clickable { newEventCategory = cat }
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = if (cat == "Festivals") "🎉 Festival" else "🎯 Other Milestone",
+                                    color = if (isSel) Color.White else Color.LightGray,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+
                     TextField(
                         value = eventName,
                         onValueChange = { eventName = it },
-                        label = { Text("Milestone Title") },
+                        label = { Text(if (newEventCategory == "Festivals") "Festival Name" else "Milestone Title") },
                         colors = TextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.LightGray,
@@ -7304,7 +7691,8 @@ fun CountdownView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                         if (eventName.isNotEmpty()) {
                             val parsedCal = parseDateStringToCalendar(eventDateText)
                             val targetTime = parsedCal?.timeInMillis ?: (System.currentTimeMillis() + 10 * 24 * 3600 * 1000L)
-                            viewModel.createDeadline(eventName, (maxOf(0L, targetTime - System.currentTimeMillis()) / (24 * 3600 * 1000L)))
+                            val finalName = if (newEventCategory == "Festivals") "[Festival] $eventName" else eventName
+                            viewModel.createDeadline(finalName, (maxOf(0L, targetTime - System.currentTimeMillis()) / (24 * 3600 * 1000L)))
                         }
                         showAddDialog = false
                     },

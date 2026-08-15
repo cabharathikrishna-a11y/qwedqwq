@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.example.util.FocusTimerManager
+import com.example.util.LiveTimerNotificationManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -91,6 +92,8 @@ class KeepAliveService : Service() {
     }
 
     private fun hasActiveSession(): Boolean {
+        if (FocusTimerManager.isMinusTimerActive.value) return true
+
         val isTimerOn = FocusTimerManager.isTimerRunning.value
         val totalSecsLeft = FocusTimerManager.timerSecondsLeft.value
         val totalDurationSecs = FocusTimerManager.timerDurationMinutes.value * 60
@@ -114,12 +117,9 @@ class KeepAliveService : Service() {
         super.onCreate()
         
         // 1. INSTANTLY satisfy the Android OS requirement
-        createNotificationChannel()
-        val initialNotification = if (hasActiveSession()) {
-            buildKeepAliveNotification()
-        } else {
-            buildFallbackNotification()
-        }
+        LiveTimerNotificationManager.createNotificationChannel(this)
+        com.example.util.LiveTimerDisplayRelay.start(this)
+        val initialNotification = LiveTimerNotificationManager.buildNotification(this)
         try {
             startForegroundSafe(NOTIFICATION_ID, initialNotification)
         } catch (e: Exception) {
@@ -254,48 +254,22 @@ class KeepAliveService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
             // Guarantee that startForeground is called instantly using a safe, up-to-date notification
-            createNotificationChannel()
+            LiveTimerNotificationManager.createNotificationChannel(this)
 
             val action = intent?.action
             Log.d("KeepAliveService", "KeepAliveService started with action: $action")
             
-            when (action) {
-                ACTION_PAUSE_TIMER -> {
-                    FocusTimerManager.pauseTimer(this)
-                }
-                ACTION_RESUME_TIMER -> {
-                    FocusTimerManager.startTimer(this, isResuming = true)
-                }
-                ACTION_RESET_TIMER -> {
-                    FocusTimerManager.resetTimer(this)
-                }
-                ACTION_PAUSE_STOPWATCH -> {
-                    FocusTimerManager.pauseStopwatch(this)
-                }
-                ACTION_RESUME_STOPWATCH -> {
-                    FocusTimerManager.startStopwatch(this, isResuming = true)
-                }
-                ACTION_RESET_STOPWATCH -> {
-                    FocusTimerManager.resetStopwatch(this)
-                }
+            if (action != null && action != "com.example.service.UPDATE_NOTIFICATION") {
+                LiveTimerNotificationManager.dispatchCommand(this, action)
             }
 
             // Immediately build the actual up-to-date notification and set it as foreground
-            if (hasActiveSession()) {
-                val notification = buildKeepAliveNotification()
-                startForegroundSafe(NOTIFICATION_ID, notification)
-            } else {
-                val fallbackNotification = buildFallbackNotification()
-                try {
-                    startForegroundSafe(NOTIFICATION_ID, fallbackNotification)
-                } catch (e: Exception) {
-                    Log.e("KeepAliveService", "Error setting foreground notification when idle: ${e.message}", e)
-                }
-            }
+            val notification = LiveTimerNotificationManager.buildNotification(this)
+            startForegroundSafe(NOTIFICATION_ID, notification)
         } catch (e: Exception) {
             Log.e("KeepAliveService", "Error in onStartCommand: ${e.message}", e)
             try {
-                val fallbackNotification = buildFallbackNotification()
+                val fallbackNotification = LiveTimerNotificationManager.buildNotification(this)
                 startForegroundSafe(NOTIFICATION_ID, fallbackNotification)
             } catch (inner: Exception) {
                 Log.e("KeepAliveService", "Fallback startForeground failed: ${inner.message}", inner)
@@ -309,261 +283,11 @@ class KeepAliveService : Service() {
 
     fun updateNotificationDirectly() {
         try {
-            if (hasActiveSession()) {
-                val notification = buildKeepAliveNotification()
-                startForegroundSafe(NOTIFICATION_ID, notification)
-            } else {
-                val fallbackNotification = buildFallbackNotification()
-                startForegroundSafe(NOTIFICATION_ID, fallbackNotification)
-            }
+            val notification = LiveTimerNotificationManager.buildNotification(this)
+            startForegroundSafe(NOTIFICATION_ID, notification)
         } catch (e: Exception) {
             Log.e("KeepAliveService", "Failed to update notification directly: ${e.message}", e)
         }
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "LifeOS Core Daemon",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Keeps LifeOS background app monitoring & focus timer active"
-                setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            }
-            manager.createNotificationChannel(channel)
-        }
-    }
-
-    private fun buildFallbackNotification(): Notification {
-        val launchIntent = Intent(this, com.example.MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("SHOW_TIMER_PAGE", true)
-        }
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        } else {
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        }
-        val pendingIntent = android.app.PendingIntent.getActivity(
-            this,
-            9999,
-            launchIntent,
-            flags
-        )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("LifeOS Active System")
-            .setContentText("Ensuring accurate backgrounds & task scheduling")
-            .setSmallIcon(com.example.R.drawable.ic_launcher_foreground)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setSilent(true)
-            .setOnlyAlertOnce(true)
-            .build()
-    }
-
-    private fun getActionPendingIntent(action: String): android.app.PendingIntent {
-        val intent = Intent(this, KeepAliveService::class.java).apply {
-            this.action = action
-        }
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        } else {
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        }
-        return android.app.PendingIntent.getService(
-            this,
-            action.hashCode(),
-            intent,
-            flags
-        )
-    }
-
-    private fun buildKeepAliveNotification(): Notification {
-        val launchIntent = Intent(this, com.example.MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("SHOW_TIMER_PAGE", true)
-        }
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        } else {
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        }
-        val pendingIntent = android.app.PendingIntent.getActivity(
-            this,
-            9999,
-            launchIntent,
-            flags
-        )
-
-        val isTimerOn = FocusTimerManager.isTimerRunning.value
-        val hasProgress = FocusTimerManager.timerSecondsLeft.value < FocusTimerManager.timerDurationMinutes.value * 60
-        val isPaused = !isTimerOn && hasProgress
-
-        val isStopwatchOn = FocusTimerManager.isStopwatchActive.value
-        val hasStopwatchProgress = FocusTimerManager.stopwatchSeconds.value > 0
-        val isStopwatchPaused = !isStopwatchOn && hasStopwatchProgress
-
-        val isTimerSelected = FocusTimerManager.isTabFocusTimerSelected.value
-
-        if (isTimerSelected) {
-            if (isTimerOn || isPaused) {
-                val totalSecs = FocusTimerManager.timerSecondsLeft.value
-                val hours = totalSecs / 3600
-                val mins = (totalSecs % 3600) / 60
-                val secs = totalSecs % 60
-                val timeStr = if (hours > 0) {
-                    String.format(java.util.Locale.US, "%02d:%02d:%02d", hours, mins, secs)
-                } else {
-                    String.format(java.util.Locale.US, "%02d:%02d", totalSecs / 60, secs)
-                }
-                val phase = if (FocusTimerManager.isFocusPhase.value) "Focusing 🎯" else "Break ☕"
-                val taskName = FocusTimerManager.attachedTask.value?.title ?: "Focus Session"
-                val fullTaskTitle = "$phase • $taskName"
-
-                val pauseResumeIntent = getActionPendingIntent(if (isTimerOn) ACTION_PAUSE_TIMER else ACTION_RESUME_TIMER)
-                val stopIntent = getActionPendingIntent(ACTION_RESET_TIMER)
-
-                // RemoteViews for Collapsed View
-                val rvSmall = android.widget.RemoteViews(packageName, com.example.R.layout.notification_timer_small).apply {
-                    setTextViewText(com.example.R.id.notif_timer_text, timeStr)
-                    setImageViewResource(
-                        com.example.R.id.notif_btn_pause_resume,
-                        if (isTimerOn) com.example.R.drawable.ic_notif_pause else com.example.R.drawable.ic_notif_play
-                    )
-                    setOnClickPendingIntent(com.example.R.id.notif_btn_pause_resume, pauseResumeIntent)
-                }
-
-                // RemoteViews for Expanded View
-                val rvExpanded = android.widget.RemoteViews(packageName, com.example.R.layout.notification_timer_expanded).apply {
-                    setTextViewText(com.example.R.id.notif_exp_timer_text, timeStr)
-                    setTextViewText(com.example.R.id.notif_exp_task_title, fullTaskTitle)
-                    setImageViewResource(
-                        com.example.R.id.notif_exp_btn_pause_resume,
-                        if (isTimerOn) com.example.R.drawable.ic_notif_pause else com.example.R.drawable.ic_notif_play
-                    )
-                    setOnClickPendingIntent(com.example.R.id.notif_exp_btn_pause_resume, pauseResumeIntent)
-                    setOnClickPendingIntent(com.example.R.id.notif_exp_btn_stop, stopIntent)
-                }
-
-                val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-                    .setSmallIcon(com.example.R.drawable.ic_launcher_foreground)
-                    .setPriority(NotificationCompat.PRIORITY_LOW)
-                    .setCategory(NotificationCompat.CATEGORY_SERVICE)
-                    .setCustomContentView(rvSmall)
-                    .setCustomBigContentView(rvExpanded)
-                    .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-                    .setContentIntent(pendingIntent)
-                    .setOngoing(true)
-                    .setSilent(true)
-                    .setOnlyAlertOnce(true)
-
-                if (isTimerOn) {
-                    builder.setContentTitle("Focus Timer ($phase)")
-                    builder.setContentText("Active - $taskName")
-                    builder.addAction(android.R.drawable.ic_media_pause, "Pause", pauseResumeIntent)
-                    builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "End", stopIntent)
-                } else {
-                    builder.setContentTitle("Focus Timer: $timeStr ($phase)")
-                    builder.setContentText("Paused - $taskName")
-                    builder.addAction(android.R.drawable.ic_media_play, "Resume", pauseResumeIntent)
-                    builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "End", stopIntent)
-                }
-
-                return builder.build()
-            }
-        } else {
-            if (isStopwatchOn || isStopwatchPaused) {
-                val totalSecs = FocusTimerManager.stopwatchSeconds.value
-                val hours = totalSecs / 3600
-                val mins = (totalSecs % 3600) / 60
-                val secs = totalSecs % 60
-                val timeStr = if (hours > 0) {
-                    String.format(java.util.Locale.US, "%02d:%02d:%02d", hours, mins, secs)
-                } else {
-                    String.format(java.util.Locale.US, "%02d:%02d", mins, secs)
-                }
-                val taskName = FocusTimerManager.attachedTask.value?.title ?: "Stopwatch Session"
-                val fullTaskTitle = "Focusing 🎯 • $taskName"
-
-                val pauseResumeIntent = getActionPendingIntent(if (isStopwatchOn) ACTION_PAUSE_STOPWATCH else ACTION_RESUME_STOPWATCH)
-                val stopIntent = getActionPendingIntent(ACTION_RESET_STOPWATCH)
-
-                // RemoteViews for Collapsed View
-                val rvSmall = android.widget.RemoteViews(packageName, com.example.R.layout.notification_timer_small).apply {
-                    setTextViewText(com.example.R.id.notif_timer_text, timeStr)
-                    setImageViewResource(
-                        com.example.R.id.notif_btn_pause_resume,
-                        if (isStopwatchOn) com.example.R.drawable.ic_notif_pause else com.example.R.drawable.ic_notif_play
-                    )
-                    setOnClickPendingIntent(com.example.R.id.notif_btn_pause_resume, pauseResumeIntent)
-                }
-
-                // RemoteViews for Expanded View
-                val rvExpanded = android.widget.RemoteViews(packageName, com.example.R.layout.notification_timer_expanded).apply {
-                    setTextViewText(com.example.R.id.notif_exp_timer_text, timeStr)
-                    setTextViewText(com.example.R.id.notif_exp_task_title, fullTaskTitle)
-                    setImageViewResource(
-                        com.example.R.id.notif_exp_btn_pause_resume,
-                        if (isStopwatchOn) com.example.R.drawable.ic_notif_pause else com.example.R.drawable.ic_notif_play
-                    )
-                    setOnClickPendingIntent(com.example.R.id.notif_exp_btn_pause_resume, pauseResumeIntent)
-                    setOnClickPendingIntent(com.example.R.id.notif_exp_btn_stop, stopIntent)
-                }
-
-                val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-                    .setSmallIcon(com.example.R.drawable.ic_launcher_foreground)
-                    .setPriority(NotificationCompat.PRIORITY_LOW)
-                    .setCategory(NotificationCompat.CATEGORY_SERVICE)
-                    .setCustomContentView(rvSmall)
-                    .setCustomBigContentView(rvExpanded)
-                    .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-                    .setContentIntent(pendingIntent)
-                    .setOngoing(true)
-                    .setSilent(true)
-                    .setOnlyAlertOnce(true)
-
-                if (isStopwatchOn) {
-                    builder.setContentTitle("Stopwatch (Focusing 🎯)")
-                    builder.setContentText("Focus session in progress")
-                    builder.addAction(android.R.drawable.ic_media_pause, "Pause", pauseResumeIntent)
-                    builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "End", stopIntent)
-                } else {
-                    builder.setContentTitle("Stopwatch: $timeStr")
-                    builder.setContentText("Paused stopwatch")
-                    builder.addAction(android.R.drawable.ic_media_play, "Resume", pauseResumeIntent)
-                    builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "End", stopIntent)
-                }
-
-                return builder.build()
-            }
-        }
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("LifeOS Active System")
-            .setContentText("Ensuring accurate backgrounds & task scheduling")
-            .setSmallIcon(com.example.R.drawable.ic_launcher_foreground)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setSilent(true)
-            .setOnlyAlertOnce(true)
-            .addAction(
-                android.R.drawable.ic_media_play,
-                "Start Stopwatch",
-                getActionPendingIntent(ACTION_RESUME_STOPWATCH)
-            )
-            .addAction(
-                android.R.drawable.ic_media_play,
-                "Start Timer",
-                getActionPendingIntent(ACTION_RESUME_TIMER)
-            )
-            .build()
     }
 
     private fun startCombinedMonitoring() {

@@ -324,7 +324,11 @@ fun GlobalSearchView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                 SectionHeader(title = "TASKS MATCHING", count = finalTasks.size)
                             }
                             items(finalTasks) { task ->
-                                TaskSearchItem(task = task, onToggle = { viewModel.toggleTaskCompletion(task) })
+                                TaskSearchItem(
+                                    task = task,
+                                    onToggle = { viewModel.toggleTaskCompletion(task) },
+                                    onOpen = { viewModel.selectTask(task.id) }
+                                )
                             }
                         }
 
@@ -334,7 +338,10 @@ fun GlobalSearchView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                 SectionHeader(title = "HABITS BOARD MATCHING", count = finalHabits.size)
                             }
                             items(finalHabits) { habit ->
-                                HabitSearchItem(habit = habit)
+                                HabitSearchItem(
+                                    habit = habit,
+                                    onOpen = { viewModel.selectHabit(habit.id) }
+                                )
                             }
                         }
 
@@ -345,7 +352,7 @@ fun GlobalSearchView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                             }
                             items(finalJournals) { entry ->
                                 JournalSearchItem(entry = entry, onOpen = {
-                                    viewModel.navigateTo(Screen.JOURNAL)
+                                    viewModel.selectJournal(entry.id)
                                 })
                             }
                         }
@@ -357,7 +364,7 @@ fun GlobalSearchView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                             }
                             items(finalContacts) { contact ->
                                 ContactSearchItem(contact = contact, onOpen = {
-                                    viewModel.navigateTo(Screen.CONTACTS)
+                                    viewModel.selectContact(contact.id)
                                 })
                             }
                         }
@@ -369,7 +376,7 @@ fun GlobalSearchView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                             }
                             items(finalFinances) { transaction ->
                                 FinanceSearchItem(transaction = transaction, onOpen = {
-                                    viewModel.navigateTo(Screen.FINANCES)
+                                    viewModel.selectFinanceTransaction(transaction.id)
                                 })
                             }
                         }
@@ -381,7 +388,7 @@ fun GlobalSearchView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                             }
                             items(finalNotes) { note ->
                                 NoteSearchItem(note = note, onOpen = {
-                                    viewModel.navigateTo(Screen.KEEP_NOTES)
+                                    viewModel.selectNote(note.id)
                                 })
                             }
                         }
@@ -425,11 +432,14 @@ fun SectionHeader(title: String, count: Int) {
 }
 
 @Composable
-fun TaskSearchItem(task: Task, onToggle: () -> Unit) {
+fun TaskSearchItem(task: Task, onToggle: () -> Unit, onOpen: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = SurfaceCard),
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpen() }
+            .testTag("task_search_item_${task.id}")
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -513,16 +523,26 @@ fun TaskSearchItem(task: Task, onToggle: () -> Unit) {
                     )
                 }
             }
+            Spacer(modifier = Modifier.width(6.dp))
+            Icon(
+                imageVector = Icons.Default.ArrowForward,
+                contentDescription = "View Task Details",
+                tint = Color.Gray,
+                modifier = Modifier.size(14.dp)
+            )
         }
     }
 }
 
 @Composable
-fun HabitSearchItem(habit: Habit) {
+fun HabitSearchItem(habit: Habit, onOpen: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = SurfaceCard),
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpen() }
+            .testTag("habit_search_item_${habit.id}")
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
@@ -561,6 +581,13 @@ fun HabitSearchItem(habit: Habit) {
                     fontWeight = FontWeight.Bold
                 )
             }
+            Spacer(modifier = Modifier.width(6.dp))
+            Icon(
+                imageVector = Icons.Default.ArrowForward,
+                contentDescription = "View Habit Details",
+                tint = Color.Gray,
+                modifier = Modifier.size(14.dp)
+            )
         }
     }
 }
@@ -839,7 +866,7 @@ fun DailyDateOverview(
                     activeDeadlines.forEach { d ->
                         Card(
                             colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                            modifier = Modifier.fillMaxWidth().clickable { viewModel.navigateTo(Screen.COUNTDOWN) }
+                            modifier = Modifier.fillMaxWidth().clickable { viewModel.selectCountdown(d.id) }
                         ) {
                             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.Flag, contentDescription = null, tint = WaterBlue, modifier = Modifier.size(18.dp))
@@ -874,13 +901,21 @@ fun DailyDateOverview(
                     if (pendingTasks.isNotEmpty()) {
                         Text("⏳ PENDING TASKS:", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         pendingTasks.forEach { task ->
-                            TaskSearchItem(task = task, onToggle = { viewModel.toggleTaskCompletion(task) })
+                            TaskSearchItem(
+                                task = task,
+                                onToggle = { viewModel.toggleTaskCompletion(task) },
+                                onOpen = { viewModel.selectTask(task.id) }
+                            )
                         }
                     }
                     if (completedTasks.isNotEmpty()) {
                         Text("✓ COMPLETED TASKS:", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         completedTasks.forEach { task ->
-                            TaskSearchItem(task = task, onToggle = { viewModel.toggleTaskCompletion(task) })
+                            TaskSearchItem(
+                                task = task,
+                                onToggle = { viewModel.toggleTaskCompletion(task) },
+                                onOpen = { viewModel.selectTask(task.id) }
+                            )
                         }
                     }
                 }
@@ -908,7 +943,7 @@ fun DailyDateOverview(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(SurfaceCard)
-                                .clickable { viewModel.toggleHabit(habit, searchDateStr) }
+                                .clickable { viewModel.selectHabit(habit.id) }
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -1007,7 +1042,7 @@ fun DailyDateOverview(
                     dateJournals.forEach { entry ->
                         Card(
                             colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                            modifier = Modifier.fillMaxWidth().clickable { viewModel.navigateTo(Screen.JOURNAL) }
+                            modifier = Modifier.fillMaxWidth().clickable { viewModel.selectJournal(entry.id) }
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(entry.title, color = WaterBlue, fontWeight = FontWeight.Bold, fontSize = 14.sp)

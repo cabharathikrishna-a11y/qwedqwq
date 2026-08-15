@@ -10934,6 +10934,48 @@ fun SettingsTimerConfigurationPage(
                             Text("Tasks", color = Color(0xFF3B82F6), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Web App Shortcuts (Pin to Home Screen)", color = Color.Gray, fontSize = 10.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                com.example.util.AppShortcutHelper.pinInstagramShortcut(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1E1F)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 6.dp, horizontal = 2.dp)
+                        ) {
+                            Text("Instagram", color = Color(0xFFE1306C), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = {
+                                com.example.util.AppShortcutHelper.pinYouTubeShortcut(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1E1F)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 6.dp, horizontal = 2.dp)
+                        ) {
+                            Text("YouTube", color = Color(0xFFFF4D4D), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = {
+                                com.example.util.AppShortcutHelper.pinSpotifyShortcut(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1E1F)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 6.dp, horizontal = 2.dp)
+                        ) {
+                            Text("Spotify", color = Color(0xFF1DB954), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
 
                 val widgetPrefs = remember { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }

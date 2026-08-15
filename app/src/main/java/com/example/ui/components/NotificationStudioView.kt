@@ -30,6 +30,9 @@ import androidx.core.app.NotificationCompat
 import com.example.ui.AppViewModel
 import com.example.ui.theme.DeepSlate
 import com.example.ui.theme.WaterBlue
+import com.example.util.FocusTimerManager
+import com.example.util.LiveTimerDisplayRelay
+import com.example.util.LiveTimerNotificationManager
 import com.example.util.UrgentNotificationHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -560,6 +563,304 @@ fun NotificationStudioView(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
                             )
+                        }
+                    }
+                }
+            }
+
+            // Section 5: Live Stopwatch & Pomodoro Notification Manager
+            var notifPrefs by remember {
+                mutableStateOf(LiveTimerNotificationManager.loadButtonPreferences(context))
+            }
+            val liveSnapshot by produceState(initialValue = LiveTimerNotificationManager.fetchCurrentSnapshot(context)) {
+                while (true) {
+                    value = LiveTimerNotificationManager.fetchCurrentSnapshot(context)
+                    kotlinx.coroutines.delay(1000)
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Timer,
+                            contentDescription = null,
+                            tint = Color(0xFF3B82F6)
+                        )
+                        Column {
+                            Text(
+                                "Live Timer & Stopwatch Daemon",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                "Real-time background snapshot, button config & command dispatcher",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    // Live snapshot display badge
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF0F172A),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Mode: ${liveSnapshot.mode.name}",
+                                    color = Color(0xFF38BDF8),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                                Text(
+                                    liveSnapshot.formattedTime,
+                                    color = if (liveSnapshot.isMinusTimer) Color(0xFFEF4444) else Color(0xFF10B981),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                            }
+                            Text(
+                                "Title: ${liveSnapshot.contentTitle}",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                maxLines = 1
+                            )
+                            Text(
+                                "Status: ${if (liveSnapshot.isRunning) "RUNNING" else if (liveSnapshot.isPaused) "PAUSED" else "IDLE"} • ${liveSnapshot.taskTitle}",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    // Button customizer toggles
+                    Text(
+                        "Notification Action Buttons",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Show +1m Button", color = Color(0xFFCBD5E1), fontSize = 13.sp)
+                        Switch(
+                            checked = notifPrefs.showAddOneMinuteButton,
+                            onCheckedChange = { checked ->
+                                val updated = notifPrefs.copy(showAddOneMinuteButton = checked)
+                                notifPrefs = updated
+                                LiveTimerNotificationManager.saveButtonPreferences(context, updated)
+                            },
+                            modifier = Modifier.testTag("toggle_add_1m_button")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Show +5m Button", color = Color(0xFFCBD5E1), fontSize = 13.sp)
+                        Switch(
+                            checked = notifPrefs.showAddFiveMinuteButton,
+                            onCheckedChange = { checked ->
+                                val updated = notifPrefs.copy(showAddFiveMinuteButton = checked)
+                                notifPrefs = updated
+                                LiveTimerNotificationManager.saveButtonPreferences(context, updated)
+                            },
+                            modifier = Modifier.testTag("toggle_add_5m_button")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Show End Session Button", color = Color(0xFFCBD5E1), fontSize = 13.sp)
+                        Switch(
+                            checked = notifPrefs.showEndButton,
+                            onCheckedChange = { checked ->
+                                val updated = notifPrefs.copy(showEndButton = checked)
+                                notifPrefs = updated
+                                LiveTimerNotificationManager.saveButtonPreferences(context, updated)
+                            },
+                            modifier = Modifier.testTag("toggle_end_button")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Custom RemoteViews UI", color = Color(0xFFCBD5E1), fontSize = 13.sp)
+                        Switch(
+                            checked = notifPrefs.useCustomRemoteViews,
+                            onCheckedChange = { checked ->
+                                val updated = notifPrefs.copy(useCustomRemoteViews = checked)
+                                notifPrefs = updated
+                                LiveTimerNotificationManager.saveButtonPreferences(context, updated)
+                            },
+                            modifier = Modifier.testTag("toggle_custom_remote_views")
+                        )
+                    }
+
+                    // Direct Command Dispatcher Trigger Buttons
+                    Text(
+                        "Test Notification Actions",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Button(
+                            onClick = {
+                                LiveTimerNotificationManager.dispatchCommand(
+                                    context,
+                                    LiveTimerNotificationManager.ACTION_TOGGLE_TIMER
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("btn_dispatch_toggle_timer"),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Toggle Timer", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                LiveTimerNotificationManager.dispatchCommand(
+                                    context,
+                                    LiveTimerNotificationManager.ACTION_ADD_1_MIN
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("btn_dispatch_add_1m"),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("+1m", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                LiveTimerNotificationManager.dispatchCommand(
+                                    context,
+                                    LiveTimerNotificationManager.ACTION_RESET_TIMER
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("btn_dispatch_reset_timer"),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Reset", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // 1-Sec Live Display Relay Broadcaster action
+                    Button(
+                        onClick = {
+                            LiveTimerDisplayRelay.forceSync(context)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("btn_sync_display_relay"),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF475569)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            "⚡ Force Relay Sync (OSD • Widgets • Notif)",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            // Section 6: Security & Anti-Tamper Privacy Vault Status
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = Color(0xFF10B981)
+                        )
+                        Column {
+                            Text(
+                                "Security & Encryption Shield",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                "Hardware Keystore AES-256 GCM & Cleartext Block Active",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF1E293B),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("🔒 Storage: Hardware-backed AES-256 GCM encryption (AndroidKeyStore / TEE)", color = Color(0xFF38BDF8), fontSize = 11.sp)
+                            Text("🌐 Transmission: TLS Strict, Cleartext HTTP blocked by OS Network Security", color = Color(0xFF4ADE80), fontSize = 11.sp)
+                            Text("🛡️ Tamper Shield: In-memory sanitization & cryptographic auth tag validation", color = Color(0xFFFBBF24), fontSize = 11.sp)
                         }
                     }
                 }

@@ -78,6 +78,28 @@ fun HabitsView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     var curScheduledTime by remember { mutableStateOf("08:00") }
     var curIsReminderEnabled by remember { mutableStateOf(false) }
 
+    val externalSelectedId by viewModel.selectedHabitId.collectAsState()
+    LaunchedEffect(externalSelectedId, allDbHabits) {
+        externalSelectedId?.let { idVal ->
+            val habit = allDbHabits.find { it.id == idVal }
+            if (habit != null) {
+                isEditMode = true
+                editingHabitTarget = habit
+                curHabitName = habit.name
+                curTimeOfDay = habit.timeOfDay
+                curTargetCount = habit.targetCount.toString()
+                curFrequency = habit.frequency
+                curWeeklyDay = habit.weeklyDay
+                curMonthlyStartDate = habit.monthlyStartDate.toString()
+                curMonthlyEndDate = habit.monthlyEndDate.toString()
+                curScheduledTime = habit.scheduledTime
+                curIsReminderEnabled = habit.isReminderEnabled
+                showCreateEditDialog = true
+                viewModel.clearSelectedHabitId()
+            }
+        }
+    }
+
     // Today format helper
     val todayDateStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
     val context = androidx.compose.ui.platform.LocalContext.current

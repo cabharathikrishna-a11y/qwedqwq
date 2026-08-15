@@ -17,7 +17,7 @@ object AppShortcutHelper {
             putExtra("NAVIGATE_TO", "TIMER")
             putExtra("SHOW_TIMER_PAGE", true)
         }
-        return ShortcutInfoCompat.Builder(context, "shortcut_timer")
+        return ShortcutInfoCompat.Builder(context, "shortcut_pin_timer")
             .setShortLabel(context.getString(R.string.shortcut_timer_short))
             .setLongLabel(context.getString(R.string.shortcut_timer_long))
             .setIcon(IconCompat.createWithResource(context, R.drawable.ic_shortcut_timer))
@@ -32,7 +32,7 @@ object AppShortcutHelper {
             putExtra("NAVIGATE_TO", "JOURNAL")
             putExtra("SHOW_JOURNAL_PAGE", true)
         }
-        return ShortcutInfoCompat.Builder(context, "shortcut_journal")
+        return ShortcutInfoCompat.Builder(context, "shortcut_pin_journal")
             .setShortLabel(context.getString(R.string.shortcut_journal_short))
             .setLongLabel(context.getString(R.string.shortcut_journal_long))
             .setIcon(IconCompat.createWithResource(context, R.drawable.ic_shortcut_journal))
@@ -47,11 +47,56 @@ object AppShortcutHelper {
             putExtra("NAVIGATE_TO", "TASKS")
             putExtra("SHOW_TASKS_PAGE", true)
         }
-        return ShortcutInfoCompat.Builder(context, "shortcut_tasks")
+        return ShortcutInfoCompat.Builder(context, "shortcut_pin_tasks")
             .setShortLabel(context.getString(R.string.shortcut_tasks_short))
             .setLongLabel(context.getString(R.string.shortcut_tasks_long))
             .setIcon(IconCompat.createWithResource(context, R.drawable.ic_shortcut_tasks))
             .setIntent(tasksIntent)
+            .build()
+    }
+
+    fun createInstagramShortcut(context: Context): ShortcutInfoCompat {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = "com.example.action.OPEN_INSTAGRAM_WEB_APP"
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("NAVIGATE_TO", "INSTAGRAM_WEB_APP")
+            putExtra("OPEN_INSTAGRAM_WEB_APP", true)
+        }
+        return ShortcutInfoCompat.Builder(context, "shortcut_instagram_web")
+            .setShortLabel(context.getString(R.string.shortcut_instagram_short))
+            .setLongLabel(context.getString(R.string.shortcut_instagram_long))
+            .setIcon(IconCompat.createWithResource(context, R.drawable.ic_instagram_shortcut))
+            .setIntent(intent)
+            .build()
+    }
+
+    fun createYouTubeShortcut(context: Context): ShortcutInfoCompat {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = "com.example.action.OPEN_YOUTUBE_WEB_APP"
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("NAVIGATE_TO", "YOUTUBE_WEB_APP")
+            putExtra("OPEN_YOUTUBE_WEB_APP", true)
+        }
+        return ShortcutInfoCompat.Builder(context, "shortcut_youtube_web")
+            .setShortLabel(context.getString(R.string.shortcut_youtube_short))
+            .setLongLabel(context.getString(R.string.shortcut_youtube_long))
+            .setIcon(IconCompat.createWithResource(context, R.drawable.ic_youtube_shortcut))
+            .setIntent(intent)
+            .build()
+    }
+
+    fun createSpotifyShortcut(context: Context): ShortcutInfoCompat {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = "com.example.action.OPEN_SPOTIFY_WEB_APP"
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("NAVIGATE_TO", "SPOTIFY_WEB_APP")
+            putExtra("OPEN_SPOTIFY_WEB_APP", true)
+        }
+        return ShortcutInfoCompat.Builder(context, "shortcut_spotify_web")
+            .setShortLabel(context.getString(R.string.shortcut_spotify_short))
+            .setLongLabel(context.getString(R.string.shortcut_spotify_long))
+            .setIcon(IconCompat.createWithResource(context, R.drawable.ic_spotify_shortcut))
+            .setIntent(intent)
             .build()
     }
 
@@ -85,6 +130,36 @@ object AppShortcutHelper {
         }
     }
 
+    fun pinInstagramShortcut(context: Context) {
+        try {
+            if (ShortcutManagerCompat.isRequestPinShortcutSupported(context)) {
+                ShortcutManagerCompat.requestPinShortcut(context, createInstagramShortcut(context), null)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AppShortcutHelper", "Failed to pin Instagram shortcut", e)
+        }
+    }
+
+    fun pinYouTubeShortcut(context: Context) {
+        try {
+            if (ShortcutManagerCompat.isRequestPinShortcutSupported(context)) {
+                ShortcutManagerCompat.requestPinShortcut(context, createYouTubeShortcut(context), null)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AppShortcutHelper", "Failed to pin YouTube shortcut", e)
+        }
+    }
+
+    fun pinSpotifyShortcut(context: Context) {
+        try {
+            if (ShortcutManagerCompat.isRequestPinShortcutSupported(context)) {
+                ShortcutManagerCompat.requestPinShortcut(context, createSpotifyShortcut(context), null)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AppShortcutHelper", "Failed to pin Spotify shortcut", e)
+        }
+    }
+
     fun publishDynamicShortcuts(context: Context) {
         try {
             // Remove legacy dynamic web shortcuts
@@ -99,14 +174,9 @@ object AppShortcutHelper {
                     "shortcut_spotify_web"
                 )
             )
-            ShortcutManagerCompat.setDynamicShortcuts(
-                context,
-                listOf(
-                    createTimerShortcut(context),
-                    createJournalShortcut(context),
-                    createTasksShortcut(context)
-                )
-            )
+            // Note: shortcut_timer, shortcut_journal, and shortcut_tasks are declared in res/xml/shortcuts.xml
+            // as static manifest shortcuts. Under Android PM, static manifest shortcuts are immutable and
+            // must not be passed to setDynamicShortcuts.
         } catch (e: Exception) {
             android.util.Log.e("AppShortcutHelper", "Failed to publish dynamic shortcuts", e)
         }

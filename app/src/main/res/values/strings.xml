@@ -45,9 +45,9 @@
     <string name="shortcut_tasks_long">Tasks</string>
 
     <string name="shortcut_instagram_short">Instagram</string>
-    <string name="shortcut_instagram_long">Instagram Web (AntiGram)</string>
+    <string name="shortcut_instagram_long">Instagram</string>
     <string name="shortcut_youtube_short">YouTube</string>
-    <string name="shortcut_youtube_long">YouTube Web (AntiTube)</string>
+    <string name="shortcut_youtube_long">YouTube</string>
     <string name="shortcut_spotify_short">Spotify</string>
-    <string name="shortcut_spotify_long">Spotify Web (AntiSpotify)</string>
+    <string name="shortcut_spotify_long">Spotify</string>
 </resources>

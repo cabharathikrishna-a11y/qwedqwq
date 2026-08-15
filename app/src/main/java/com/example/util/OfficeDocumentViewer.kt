@@ -413,82 +413,578 @@ fun OfficeDocumentViewerContent(
 }
 
 /**
- * Excel / CSV Interactive Grid Viewer
+ * Excel / CSV Interactive Grid Viewer & Editor
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExcelSpreadsheetViewer(
     data: OfficeDocumentData.ExcelData,
     searchQuery: String
 ) {
+    // 1. In-memory editable sheets model
+    val editableSheets = remember(data) {
+        val map = mutableStateMapOf<String, MutableList<MutableList<String>>>()
+        data.sheets.forEach { (name, rows) ->
+            map[name] = rows.map { it.toMutableList() }.toMutableList()
+        }
+        if (map.isEmpty()) {
+            map["Sheet1"] = mutableListOf(
+                mutableListOf("Item", "Category", "Quantity", "Price", "Total"),
+                mutableListOf("Sample A", "Product", "10", "15.00", "150.00"),
+                mutableListOf("Sample B", "Service", "5", "40.00", "200.00")
+            )
+        }
+        map
+    }
+
     var selectedSheetName by remember(data) {
-        mutableStateOf(data.sheets.keys.firstOrNull() ?: "Sheet1")
+        mutableStateOf(editableSheets.keys.firstOrNull() ?: "Sheet1")
     }
 
-    val currentRows = remember(data, selectedSheetName) {
-        data.sheets[selectedSheetName] ?: emptyList()
+    // Ensure selected sheet exists
+    val currentRows = editableSheets[selectedSheetName] ?: mutableListOf()
+    val columnCount = if (currentRows.isEmpty()) 0 else currentRows.maxOfOrNull { it.size } ?: 0
+
+    // 2. Selection States
+    var selectedCell by remember { mutableStateOf<Pair<Int, Int>?>(null) } // (row, col)
+    var selectedRows by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var selectedCols by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var multiSelectedCells by remember { mutableStateOf<Set<Pair<Int, Int>>>(emptySet()) }
+    var isMultiSelectMode by remember { mutableStateOf(false) }
+
+    // 3. Cell Sizing States (Expand / Decrease)
+    var defaultCellWidth by remember { mutableStateOf(120.dp) }
+    var defaultCellHeight by remember { mutableStateOf(36.dp) }
+    val columnWidthOverrides = remember { mutableStateMapOf<Int, androidx.compose.ui.unit.Dp>() }
+    val rowHeightOverrides = remember { mutableStateMapOf<Int, androidx.compose.ui.unit.Dp>() }
+    var showSizingPanel by remember { mutableStateOf(false) }
+
+    // 4. Cell Editing State
+    var formulaText by remember { mutableStateOf("") }
+    var isEditingCell by remember { mutableStateOf(false) }
+    var editingCellCoords by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var editDialogText by remember { mutableStateOf("") }
+    var showEditDialog by remember { mutableStateOf(false) }
+
+    // Sync formula text with currently selected single cell
+    LaunchedEffect(selectedCell, currentRows) {
+        selectedCell?.let { (r, c) ->
+            if (r in currentRows.indices && c in (0 until (currentRows.getOrNull(r)?.size ?: 0))) {
+                formulaText = currentRows[r][c]
+            }
+        }
     }
 
-    val columnCount = remember(currentRows) {
-        currentRows.maxOfOrNull { it.size } ?: 0
+    // Helper functions for cell values and selection
+    fun isCellSelected(r: Int, c: Int): Boolean {
+        if (selectedRows.contains(r)) return true
+        if (selectedCols.contains(c)) return true
+        if (selectedCell == Pair(r, c)) return true
+        if (multiSelectedCells.contains(Pair(r, c))) return true
+        return false
+    }
+
+    fun updateCellValue(r: Int, c: Int, newValue: String) {
+        if (r in currentRows.indices) {
+            val row = currentRows[r]
+            while (row.size <= c) {
+                row.add("")
+            }
+            row[c] = newValue
+            // Trigger recomposition by creating shallow copy
+            editableSheets[selectedSheetName] = ArrayList(currentRows)
+        }
+    }
+
+    // Math calculations on selected cells
+    val selectedValues = remember(selectedCell, selectedRows, selectedCols, multiSelectedCells, currentRows) {
+        val list = mutableListOf<String>()
+        if (selectedRows.isNotEmpty()) {
+            for (r in selectedRows) {
+                if (r in currentRows.indices) {
+                    for (c in 0 until columnCount) {
+                        list.add(currentRows[r].getOrNull(c) ?: "")
+                    }
+                }
+            }
+        } else if (selectedCols.isNotEmpty()) {
+            for (c in selectedCols) {
+                for (r in currentRows.indices) {
+                    list.add(currentRows[r].getOrNull(c) ?: "")
+                }
+            }
+        } else if (multiSelectedCells.isNotEmpty()) {
+            for ((r, c) in multiSelectedCells) {
+                if (r in currentRows.indices) {
+                    list.add(currentRows[r].getOrNull(c) ?: "")
+                }
+            }
+        } else if (selectedCell != null) {
+            val (r, c) = selectedCell!!
+            if (r in currentRows.indices) {
+                list.add(currentRows[r].getOrNull(c) ?: "")
+            }
+        }
+        list
+    }
+
+    val numericStats = remember(selectedValues) {
+        val numbers = selectedValues.mapNotNull { it.trim().toDoubleOrNull() }
+        if (numbers.isNotEmpty()) {
+            val sum = numbers.sum()
+            val avg = sum / numbers.size
+            val min = numbers.minOrNull() ?: 0.0
+            val max = numbers.maxOrNull() ?: 0.0
+            Triple(sum, avg, Triple(numbers.size, min, max))
+        } else null
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Sheet Tabs Bar if multiple sheets exist
-        if (data.sheets.size > 1) {
-            LazyRow(
+        // ==========================================
+        // TOP 1: Sheet Tabs Bar (Always clearly visible)
+        // ==========================================
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color(0xFF1E293B),
+            shadowElevation = 2.dp
+        ) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF1F2937))
                     .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                items(data.sheets.keys.toList()) { sheetName ->
-                    val isSelected = sheetName == selectedSheetName
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { selectedSheetName = sheetName },
-                        label = { Text(sheetName, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF10B981),
-                            selectedLabelColor = Color.White,
-                            containerColor = Color(0xFF374151),
-                            labelColor = Color.LightGray
+                Icon(
+                    imageVector = Icons.Default.TableChart,
+                    contentDescription = "Sheets",
+                    tint = Color(0xFF10B981),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Sheets (${editableSheets.size}):",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+
+                LazyRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items(editableSheets.keys.toList()) { sheetName ->
+                        val isSelected = sheetName == selectedSheetName
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) Color(0xFF10B981) else Color(0xFF334155),
+                            modifier = Modifier
+                                .clickable {
+                                    selectedSheetName = sheetName
+                                    selectedCell = null
+                                    selectedRows = emptySet()
+                                    selectedCols = emptySet()
+                                    multiSelectedCells = emptySet()
+                                }
+                                .testTag("sheet_tab_$sheetName")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.Description,
+                                    contentDescription = null,
+                                    tint = if (isSelected) Color.White else Color(0xFF94A3B8),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    text = sheetName,
+                                    color = if (isSelected) Color.White else Color(0xFFE2E8F0),
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Add Sheet Button
+                IconButton(
+                    onClick = {
+                        val newSheetName = "Sheet${editableSheets.size + 1}"
+                        editableSheets[newSheetName] = mutableListOf(
+                            mutableListOf("Col A", "Col B", "Col C"),
+                            mutableListOf("", "", "")
                         )
+                        selectedSheetName = newSheetName
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add Sheet",
+                        tint = Color(0xFF10B981),
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
         }
 
-        // Stats Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF111827))
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        // ==========================================
+        // TOP 2: Live Formula / Cell Edit Bar
+        // ==========================================
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color(0xFF0F172A),
+            border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFF334155))
         ) {
-            Text(
-                text = "${currentRows.size} rows • $columnCount columns",
-                color = Color.Gray,
-                fontSize = 11.sp
-            )
-            Text(
-                text = "Sheet: $selectedSheetName",
-                color = Color(0xFF10B981),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Cell Coordinate Label (e.g., [B3] or Selection Summary)
+                val coordLabel = when {
+                    selectedRows.isNotEmpty() -> "Rows: ${selectedRows.map { it + 1 }.sorted().joinToString(",")}"
+                    selectedCols.isNotEmpty() -> "Cols: ${selectedCols.map { getColumnLetterName(it) }.sorted().joinToString(",")}"
+                    multiSelectedCells.isNotEmpty() -> "${multiSelectedCells.size} Cells"
+                    selectedCell != null -> "${getColumnLetterName(selectedCell!!.second)}${selectedCell!!.first + 1}"
+                    else -> "No Cell"
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1E293B),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.6f))
+                ) {
+                    Text(
+                        text = coordLabel,
+                        color = Color(0xFF60A5FA),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+
+                Text("fx", color = Color(0xFF94A3B8), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+
+                // Editable text box for the active cell
+                OutlinedTextField(
+                    value = formulaText,
+                    onValueChange = { newTxt ->
+                        formulaText = newTxt
+                        selectedCell?.let { (r, c) ->
+                            updateCellValue(r, c, newTxt)
+                        }
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .testTag("excel_formula_input"),
+                    placeholder = { Text("Select cell to edit value...", color = Color.Gray, fontSize = 12.sp) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF3B82F6),
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedContainerColor = Color(0xFF1E293B),
+                        unfocusedContainerColor = Color(0xFF1E293B)
+                    )
+                )
+
+                // Quick Edit Modal Button
+                if (selectedCell != null) {
+                    IconButton(
+                        onClick = {
+                            selectedCell?.let { (r, c) ->
+                                editingCellCoords = Pair(r, c)
+                                editDialogText = currentRows.getOrNull(r)?.getOrNull(c) ?: ""
+                                showEditDialog = true
+                            }
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit Cell in Dialog",
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
         }
 
+        // ==========================================
+        // TOP 3: Action & Cell Resizing Toolbar
+        // ==========================================
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color(0xFF1E293B),
+            border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFF334155))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Multi-select Mode Toggle
+                FilterChip(
+                    selected = isMultiSelectMode,
+                    onClick = { isMultiSelectMode = !isMultiSelectMode },
+                    label = { Text(if (isMultiSelectMode) "Multi: ON" else "Multi-Select", fontSize = 11.sp) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (isMultiSelectMode) Icons.Default.CheckCircle else Icons.Default.SelectAll,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF2563EB),
+                        selectedLabelColor = Color.White,
+                        containerColor = Color(0xFF334155),
+                        labelColor = Color(0xFFE2E8F0)
+                    )
+                )
+
+                // Expand / Decrease Cell Size controls
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("Cell Size:", color = Color(0xFF94A3B8), fontSize = 11.sp)
+
+                    // Width shrink / expand
+                    IconButton(
+                        onClick = {
+                            defaultCellWidth = maxOf(60.dp, defaultCellWidth - 20.dp)
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Remove,
+                            contentDescription = "Decrease Width",
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    Text(
+                        "${defaultCellWidth.value.toInt()}w",
+                        color = Color(0xFF38BDF8),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    IconButton(
+                        onClick = {
+                            defaultCellWidth = minOf(300.dp, defaultCellWidth + 20.dp)
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Expand Width",
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    VerticalDivider(modifier = Modifier.height(16.dp), color = Color(0xFF475569))
+
+                    // Height shrink / expand
+                    IconButton(
+                        onClick = {
+                            defaultCellHeight = maxOf(24.dp, defaultCellHeight - 6.dp)
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ExpandLess,
+                            contentDescription = "Decrease Height",
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    Text(
+                        "${defaultCellHeight.value.toInt()}h",
+                        color = Color(0xFF34D399),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    IconButton(
+                        onClick = {
+                            defaultCellHeight = minOf(80.dp, defaultCellHeight + 6.dp)
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ExpandMore,
+                            contentDescription = "Expand Height",
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                // Quick Row/Col Add Operations Menu
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Add Row Button
+                    IconButton(
+                        onClick = {
+                            val newRow = MutableList(columnCount.coerceAtLeast(3)) { "" }
+                            currentRows.add(newRow)
+                            editableSheets[selectedSheetName] = ArrayList(currentRows)
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.TableRows,
+                            contentDescription = "Add Row",
+                            tint = Color(0xFF60A5FA),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    // Add Column Button
+                    IconButton(
+                        onClick = {
+                            currentRows.forEach { it.add("") }
+                            editableSheets[selectedSheetName] = ArrayList(currentRows)
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ViewColumn,
+                            contentDescription = "Add Column",
+                            tint = Color(0xFF34D399),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    // Delete Selected Row / Col Button
+                    if (selectedRows.isNotEmpty() || selectedCols.isNotEmpty()) {
+                        IconButton(
+                            onClick = {
+                                if (selectedRows.isNotEmpty()) {
+                                    val sortedRows = selectedRows.sortedDescending()
+                                    sortedRows.forEach { idx ->
+                                        if (idx in currentRows.indices) {
+                                            currentRows.removeAt(idx)
+                                        }
+                                    }
+                                    selectedRows = emptySet()
+                                }
+                                if (selectedCols.isNotEmpty()) {
+                                    val sortedCols = selectedCols.sortedDescending()
+                                    currentRows.forEach { row ->
+                                        sortedCols.forEach { cIdx ->
+                                            if (cIdx in row.indices) {
+                                                row.removeAt(cIdx)
+                                            }
+                                        }
+                                    }
+                                    selectedCols = emptySet()
+                                }
+                                editableSheets[selectedSheetName] = ArrayList(currentRows)
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete Selected",
+                                tint = Color(0xFFEF4444),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // STATS / SUMMARY BAR (When numbers or cells selected)
+        // ==========================================
+        if (numericStats != null || selectedValues.size > 1) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF1E1B4B),
+                border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFF6366F1))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Selected: ${selectedValues.size} cells",
+                        color = Color(0xFFC7D2FE),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (numericStats != null) {
+                        val (sum, avg, countDetails) = numericStats
+                        Text(
+                            "SUM: ${String.format(java.util.Locale.US, "%.2f", sum)}",
+                            color = Color(0xFF4ADE80),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "AVG: ${String.format(java.util.Locale.US, "%.2f", avg)}",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "COUNT: ${countDetails.first}",
+                            color = Color(0xFFFBBF24),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // MAIN: Interactive Scrollable Grid Table
+        // ==========================================
         if (currentRows.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Sheet is empty", color = Color.Gray)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Sheet '$selectedSheetName' is empty", color = Color.Gray)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            currentRows.add(mutableListOf("Header 1", "Header 2", "Header 3"))
+                            currentRows.add(mutableListOf("", "", ""))
+                            editableSheets[selectedSheetName] = ArrayList(currentRows)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                    ) {
+                        Text("Initialize Sample Table")
+                    }
+                }
             }
         } else {
-            // Interactive Scrollable Grid Table
             val horizontalScrollState = rememberScrollState()
-            
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -502,38 +998,77 @@ fun ExcelSpreadsheetViewer(
                     item {
                         Row(
                             modifier = Modifier
-                                .background(Color(0xFF374151))
-                                .border(0.5.dp, Color(0xFF4B5563))
+                                .background(Color(0xFF1E293B))
+                                .border(0.5.dp, Color(0xFF475569))
                         ) {
-                            // Row Number Header
+                            // Top-Left Select-All Corner Button (#)
+                            val isAllSelected = selectedRows.size == currentRows.size && currentRows.isNotEmpty()
                             Box(
                                 modifier = Modifier
                                     .width(48.dp)
-                                    .height(32.dp)
-                                    .background(Color(0xFF1F2937))
-                                    .border(0.5.dp, Color(0xFF4B5563)),
+                                    .height(defaultCellHeight)
+                                    .background(if (isAllSelected) Color(0xFF2563EB) else Color(0xFF1E293B))
+                                    .border(0.5.dp, Color(0xFF475569))
+                                    .clickable {
+                                        if (isAllSelected) {
+                                            selectedRows = emptySet()
+                                            selectedCols = emptySet()
+                                            selectedCell = null
+                                            multiSelectedCells = emptySet()
+                                        } else {
+                                            selectedRows = currentRows.indices.toSet()
+                                            selectedCols = (0 until columnCount).toSet()
+                                        }
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("#", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (isAllSelected) "✓" else "◢",
+                                    color = if (isAllSelected) Color.White else Color.Gray,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
 
+                            // Column Letters (A, B, C...)
                             for (colIndex in 0 until columnCount) {
                                 val colLabel = getColumnLetterName(colIndex)
+                                val isColSelected = selectedCols.contains(colIndex)
+                                val colWidth = columnWidthOverrides[colIndex] ?: defaultCellWidth
+
                                 Box(
                                     modifier = Modifier
-                                        .width(130.dp)
-                                        .height(32.dp)
-                                        .background(Color(0xFF1F2937))
-                                        .border(0.5.dp, Color(0xFF4B5563))
-                                        .padding(horizontal = 8.dp),
+                                        .width(colWidth)
+                                        .height(defaultCellHeight)
+                                        .background(if (isColSelected) Color(0xFF2563EB) else Color(0xFF1E293B))
+                                        .border(0.5.dp, if (isColSelected) Color(0xFF60A5FA) else Color(0xFF475569))
+                                        .clickable {
+                                            if (isMultiSelectMode) {
+                                                selectedCols = if (selectedCols.contains(colIndex)) {
+                                                    selectedCols - colIndex
+                                                } else {
+                                                    selectedCols + colIndex
+                                                }
+                                            } else {
+                                                selectedCols = if (selectedCols.contains(colIndex)) emptySet() else setOf(colIndex)
+                                                selectedRows = emptySet()
+                                                selectedCell = null
+                                            }
+                                        }
+                                        .padding(horizontal = 6.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = colLabel,
-                                        color = Color(0xFF9CA3AF),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = colLabel,
+                                            color = if (isColSelected) Color.White else Color(0xFFCBD5E1),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -542,58 +1077,97 @@ fun ExcelSpreadsheetViewer(
                     // Data Rows
                     itemsIndexed(currentRows) { rowIndex, row ->
                         val isHeaderRow = rowIndex == 0
+                        val isRowSelected = selectedRows.contains(rowIndex)
+                        val rowHeight = rowHeightOverrides[rowIndex] ?: defaultCellHeight
+
                         Row(
                             modifier = Modifier
-                                .background(if (isHeaderRow) Color(0xFF1E293B) else Color(0xFF0F172A))
+                                .background(if (isRowSelected) Color(0xFF1E3A8A) else if (isHeaderRow) Color(0xFF1E293B) else Color(0xFF0F172A))
                                 .border(0.2.dp, Color(0xFF334155))
                         ) {
-                            // Row Index Number
+                            // Row Number Header Box (1, 2, 3...)
                             Box(
                                 modifier = Modifier
                                     .width(48.dp)
-                                    .height(36.dp)
-                                    .background(Color(0xFF1E293B))
-                                    .border(0.2.dp, Color(0xFF334155)),
+                                    .height(rowHeight)
+                                    .background(if (isRowSelected) Color(0xFF2563EB) else Color(0xFF1E293B))
+                                    .border(0.2.dp, if (isRowSelected) Color(0xFF60A5FA) else Color(0xFF334155))
+                                    .clickable {
+                                        if (isMultiSelectMode) {
+                                            selectedRows = if (selectedRows.contains(rowIndex)) {
+                                                selectedRows - rowIndex
+                                            } else {
+                                                selectedRows + rowIndex
+                                            }
+                                        } else {
+                                            selectedRows = if (selectedRows.contains(rowIndex)) emptySet() else setOf(rowIndex)
+                                            selectedCols = emptySet()
+                                            selectedCell = null
+                                        }
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = "${rowIndex + 1}",
-                                    color = Color.Gray,
+                                    color = if (isRowSelected) Color.White else Color.Gray,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
 
+                            // Individual Cells in Row
                             for (colIndex in 0 until columnCount) {
                                 val cellValue = row.getOrNull(colIndex) ?: ""
+                                val isCellActive = selectedCell == Pair(rowIndex, colIndex)
+                                val isSelected = isCellSelected(rowIndex, colIndex)
                                 val isMatch = searchQuery.isNotBlank() && cellValue.contains(searchQuery, ignoreCase = true)
+                                val colWidth = columnWidthOverrides[colIndex] ?: defaultCellWidth
 
                                 Box(
                                     modifier = Modifier
-                                        .width(130.dp)
-                                        .height(36.dp)
+                                        .width(colWidth)
+                                        .height(rowHeight)
                                         .background(
                                             when {
+                                                isCellActive -> Color(0xFF2563EB).copy(alpha = 0.5f)
+                                                isSelected -> Color(0xFF3B82F6).copy(alpha = 0.3f)
                                                 isMatch -> Color(0xFF9333EA).copy(alpha = 0.4f)
                                                 isHeaderRow -> Color(0xFF1E293B)
                                                 colIndex % 2 == 0 -> Color(0xFF0F172A)
                                                 else -> Color(0xFF111827)
                                             }
                                         )
-                                        .border(0.2.dp, Color(0xFF334155))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        .border(
+                                            if (isCellActive) 1.5.dp else if (isSelected) 1.dp else 0.2.dp,
+                                            if (isCellActive) Color(0xFF60A5FA) else if (isSelected) Color(0xFF38BDF8) else Color(0xFF334155)
+                                        )
+                                        .clickable {
+                                            if (isMultiSelectMode) {
+                                                val pair = Pair(rowIndex, colIndex)
+                                                multiSelectedCells = if (multiSelectedCells.contains(pair)) {
+                                                    multiSelectedCells - pair
+                                                } else {
+                                                    multiSelectedCells + pair
+                                                }
+                                                selectedCell = pair
+                                            } else {
+                                                selectedCell = Pair(rowIndex, colIndex)
+                                                selectedRows = emptySet()
+                                                selectedCols = emptySet()
+                                                multiSelectedCells = emptySet()
+                                            }
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
                                     contentAlignment = Alignment.CenterStart
                                 ) {
-                                    SelectionContainer {
-                                        Text(
-                                            text = cellValue,
-                                            color = if (isHeaderRow) Color(0xFF60A5FA) else Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isHeaderRow) FontWeight.Bold else FontWeight.Normal,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
+                                    Text(
+                                        text = cellValue,
+                                        color = if (isHeaderRow) Color(0xFF60A5FA) else Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isHeaderRow) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                         }
@@ -601,6 +1175,63 @@ fun ExcelSpreadsheetViewer(
                 }
             }
         }
+    }
+
+    // ==========================================
+    // DIALOG: Cell Value Modal Editor
+    // ==========================================
+    if (showEditDialog && editingCellCoords != null) {
+        val (r, c) = editingCellCoords!!
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = {
+                Text(
+                    "Edit Cell [${getColumnLetterName(c)}${r + 1}]",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Sheet: $selectedSheetName • Row: ${r + 1}, Col: ${getColumnLetterName(c)}",
+                        color = Color.Gray,
+                        fontSize = 12.sp
+                    )
+                    OutlinedTextField(
+                        value = editDialogText,
+                        onValueChange = { editDialogText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Cell Value") },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF10B981),
+                            unfocusedBorderColor = Color.Gray
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        updateCellValue(r, c, editDialogText)
+                        formulaText = editDialogText
+                        showEditDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                ) {
+                    Text("Save", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDialog = false }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1E293B)
+        )
     }
 }
 

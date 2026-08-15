@@ -836,6 +836,7 @@ object DynamicCommandManager {
                         }
 
                         com.example.util.FocusTimerManager.setFocusPhase(false)
+                        com.example.util.FocusTimerManager.setWasStartedFromStopwatch(true)
                         com.example.util.FocusTimerManager.setTimerSecondsLeft(remainingBreakSecs)
                         if (com.example.util.FocusTimerManager.isStopwatchActive.value) {
                             com.example.util.FocusTimerManager.pauseStopwatch(context)
@@ -928,6 +929,7 @@ object DynamicCommandManager {
                         }
 
                         com.example.util.FocusTimerManager.setFocusPhase(false)
+                        com.example.util.FocusTimerManager.setWasStartedFromStopwatch(false)
                         com.example.util.FocusTimerManager.setTimerSecondsLeft(remainingBreakSecs)
                         if (remainingBreakSecs > 0 && !com.example.util.FocusTimerManager.isTimerRunning.value) {
                             com.example.util.FocusTimerManager.startTimer(context, stopActiveAlarm = false, isResuming = true)

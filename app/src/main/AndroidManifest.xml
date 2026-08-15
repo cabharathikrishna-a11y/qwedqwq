@@ -61,6 +61,7 @@
         android:allowBackup="true"
         android:hardwareAccelerated="true"
         android:requestLegacyExternalStorage="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -563,6 +564,26 @@
         </receiver>
 
         <receiver
+            android:name=".receiver.TimerNotificationReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.service.ACTION_PAUSE_TIMER" />
+                <action android:name="com.example.service.ACTION_RESUME_TIMER" />
+                <action android:name="com.example.service.ACTION_RESET_TIMER" />
+                <action android:name="com.example.service.ACTION_PAUSE_STOPWATCH" />
+                <action android:name="com.example.service.ACTION_RESUME_STOPWATCH" />
+                <action android:name="com.example.service.ACTION_RESET_STOPWATCH" />
+                <action android:name="com.example.service.ACTION_TOGGLE_TIMER" />
+                <action android:name="com.example.service.ACTION_TOGGLE_STOPWATCH" />
+                <action android:name="com.example.service.ACTION_START_BREAK_FROM_MINUS" />
+                <action android:name="com.example.service.ACTION_END_MINUS_TIMER" />
+                <action android:name="com.example.service.ACTION_ADD_1_MIN" />
+                <action android:name="com.example.service.ACTION_ADD_5_MIN" />
+                <action android:name="com.example.service.ACTION_REFRESH_NOTIFICATION" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
             android:name=".receiver.BootReceiver"
             android:exported="true">
             <intent-filter>
@@ -686,6 +707,42 @@
             android:name=".shortcut.TasksShortcutActivity"
             android:label="@string/shortcut_tasks_long"
             android:icon="@drawable/ic_shortcut_tasks"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_SHORTCUT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".shortcut.InstagramShortcutActivity"
+            android:label="@string/shortcut_instagram_long"
+            android:icon="@drawable/ic_instagram_shortcut"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_SHORTCUT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".shortcut.YouTubeShortcutActivity"
+            android:label="@string/shortcut_youtube_long"
+            android:icon="@drawable/ic_youtube_shortcut"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_SHORTCUT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".shortcut.SpotifyShortcutActivity"
+            android:label="@string/shortcut_spotify_long"
+            android:icon="@drawable/ic_spotify_shortcut"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="true">
             <intent-filter>

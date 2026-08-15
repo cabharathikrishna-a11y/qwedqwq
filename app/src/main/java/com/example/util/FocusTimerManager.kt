@@ -477,6 +477,93 @@ object FocusTimerManager {
     private val _autoStartPomo = MutableStateFlow(true)
     val autoStartPomo: StateFlow<Boolean> = _autoStartPomo.asStateFlow()
 
+    // Minus timer (overtime tracking after pomodoro focus ends if auto-start break is disabled)
+    private val _isMinusTimerActive = MutableStateFlow(false)
+    val isMinusTimerActive: StateFlow<Boolean> = _isMinusTimerActive.asStateFlow()
+
+    private val _minusTimerSeconds = MutableStateFlow(0)
+    val minusTimerSeconds: StateFlow<Int> = _minusTimerSeconds.asStateFlow()
+
+    private var minusTimerJob: kotlinx.coroutines.Job? = null
+
+    fun startMinusTimer(context: Context) {
+        init(context)
+        val appContext = context.applicationContext
+        _isMinusTimerActive.value = true
+        _minusTimerSeconds.value = 0
+        _isTimerRunning.value = false
+        _isStopwatchActive.value = false
+        _isPaused.value = false
+
+        timerJob?.cancel()
+        timerJob = null
+        stopwatchJob?.cancel()
+        stopwatchJob = null
+        minusTimerJob?.cancel()
+        minusTimerJob = scope.launch {
+            val startRealtime = android.os.SystemClock.elapsedRealtime()
+            while (_isMinusTimerActive.value) {
+                delay(1000)
+                val elapsed = ((android.os.SystemClock.elapsedRealtime() - startRealtime) / 1000).toInt()
+                _minusTimerSeconds.value = elapsed
+                updateOverlayTextAndState()
+            }
+        }
+        saveActiveSessionState(appContext)
+        KeepAliveService.updateNotification(appContext)
+        syncStateToFirebase(appContext)
+        updateOverlayVisibility(appContext)
+        com.example.widget.WidgetManager.updateAllWidgets(appContext)
+    }
+
+    fun stopMinusTimer() {
+        _isMinusTimerActive.value = false
+        _minusTimerSeconds.value = 0
+        minusTimerJob?.cancel()
+        minusTimerJob = null
+    }
+
+    fun startBreakFromMinusTimer(context: Context) {
+        init(context)
+        stopMinusTimer()
+        val appContext = context.applicationContext
+        val prefs = appContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val bMins = prefs.getInt("break_duration", 5).coerceAtLeast(1)
+        _isFocusPhase.value = false
+        _wasStartedFromStopwatch.value = false
+        _timerSecondsLeft.value = bMins * 60
+        _isPaused.value = false
+
+        val email = com.example.api.DynamicCommandManager.activeEmail
+        if (email.isNotEmpty()) {
+            val timeline = com.example.api.DynamicCommandManager.currentTimelineFlow.value
+            val task = _attachedTask.value?.title ?: "Focus Session"
+            val tag = _attachedTag.value.ifEmpty { "Study" }
+            com.example.api.DynamicCommandManager.executeMidSessionCommand("break_started", timeline, "pomodoro", task, tag)
+        }
+        appendTimelineEvent(appContext, "BREAK START")
+        startTimer(appContext, stopActiveAlarm = true)
+    }
+
+    fun endMinusTimerSession(context: Context) {
+        stopMinusTimer()
+        resetTimer(context, saveSession = false)
+    }
+
+    fun addTimerSeconds(context: Context, extraSeconds: Int) {
+        init(context)
+        val appContext = context.applicationContext
+        if (_isTabFocusTimerSelected.value) {
+            val newSecs = maxOf(1, _timerSecondsLeft.value + extraSeconds)
+            _timerSecondsLeft.value = newSecs
+            _timerDurationMinutes.value = maxOf(_timerDurationMinutes.value, (newSecs + 59) / 60)
+            saveActiveSessionState(appContext)
+            updateOverlayTextAndState()
+            KeepAliveService.updateNotification(appContext)
+            com.example.widget.WidgetManager.updateAllWidgets(appContext)
+        }
+    }
+
     private var _lastResumeBaseAccumulatedMs: Long = 0L
 
     // Controlled Mutator Functions for Encapsulation
@@ -1056,6 +1143,7 @@ object FocusTimerManager {
             }
         }
         startUiTickLoop()
+        LiveTimerDisplayRelay.start(context)
     }
 }
 
@@ -1402,6 +1490,7 @@ object FocusTimerManager {
     fun startTimer(context: Context, stopActiveAlarm: Boolean = true, isResuming: Boolean = false) {
         init(context)
         claimCommandDevice(context)
+        stopMinusTimer()
         if (_isStopwatchActive.value) {
             pauseStopwatch(context)
         }
@@ -1411,16 +1500,20 @@ object FocusTimerManager {
         if (_isFocusPhase.value && !isResuming) {
             _wasStartedFromStopwatch.value = false
         }
-        val actualResuming = isResuming || _isPaused.value || _accumulatedSessionTimeMs.value > 0L || (_isFocusPhase.value && _timerSecondsLeft.value < _timerDurationMinutes.value * 60)
+        val actualResuming = isResuming || _isPaused.value || (_isFocusPhase.value && _timerSecondsLeft.value < _timerDurationMinutes.value * 60)
         if (!actualResuming) {
             _isPaused.value = false
-            _accumulatedSessionTimeMs.value = 0L
-            _cumulativeSessionFocusSeconds.value = 0
             if (_isFocusPhase.value) {
+                _accumulatedSessionTimeMs.value = 0L
+                _cumulativeSessionFocusSeconds.value = 0
                 _timerSecondsLeft.value = _timerDurationMinutes.value * 60
             } else {
                 val prefs = context.applicationContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-                val bMins = prefs.getInt("break_duration", 5)
+                val bMins = if (_wasStartedFromStopwatch.value) {
+                    prefs.getInt("stopwatch_break_duration", _stopwatchBreakDurationMinutes.value.coerceAtLeast(1))
+                } else {
+                    prefs.getInt("break_duration", 5).coerceAtLeast(1)
+                }
                 if (_timerSecondsLeft.value <= 0) {
                     _timerSecondsLeft.value = bMins * 60
                 }
@@ -1643,34 +1736,31 @@ object FocusTimerManager {
             _accumulatedSessionTimeMs.value = 0L
             setLastResumeTimeMs(null)
 
-            // Switch to Break Mode
-            _isFocusPhase.value = false
             val prefs = appContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-            val bMins = prefs.getInt("break_duration", 5)
-            _timerSecondsLeft.value = bMins * 60
+            val autoStartBreakPref = _autoStartBreak.value && prefs.getBoolean("timer_autostart_break", true)
 
-            saveActiveSessionState(appContext)
-            KeepAliveService.updateNotification(appContext)
-            syncStateToFirebase(appContext)
-            updateOverlayVisibility(appContext)
-
-            // Auto-start break depends on autoStartBreak preference
-            val autoStartBreakPref = _autoStartBreak.value
             if (autoStartBreakPref) {
+                stopMinusTimer()
+                _isFocusPhase.value = false
+                val bMins = prefs.getInt("break_duration", 5).coerceAtLeast(1)
+                _timerSecondsLeft.value = bMins * 60
+
+                saveActiveSessionState(appContext)
+                KeepAliveService.updateNotification(appContext)
+                syncStateToFirebase(appContext)
+                updateOverlayVisibility(appContext)
+
                 startTimer(appContext, stopActiveAlarm = false)
             } else {
-                _isPaused.value = true
+                // Auto-start break is OFF: Ring sound already completed, start minus timer!
+                _isFocusPhase.value = false
+                startMinusTimer(appContext)
             }
         } else {
             // Break Finished!
             openAppWithTimerPageInFront(appContext)
 
             if (_wasStartedFromStopwatch.value) {
-                // Play bell sound for 3 seconds after stopwatch break is over
-                if (_soundEnabled.value) {
-                    playStopwatchBreakEndBellSound(appContext)
-                }
-
                 val prefs = appContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
                 val autoStartSw = _autoStartStopwatchAfterBreak.value || prefs.getBoolean("stopwatch_autostart_after_break", true)
                 if (autoStartSw) {
@@ -1954,6 +2044,7 @@ object FocusTimerManager {
         init(context)
         updateLocalInteractionTimestamp()
         stopAlarm()
+        stopMinusTimer()
         AlarmScheduler.cancelTimerEndAlarm(context.applicationContext)
         timerJob?.cancel()
         timerJob = null
@@ -2104,6 +2195,38 @@ object FocusTimerManager {
         updateLocalInteractionTimestamp()
         stopAlarm()
         
+        val appContext = context.applicationContext
+        val prefs = appContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        
+        // Finalize active stopwatch chunk locally without sending a "paused" command to RTDB
+        val chunkMs = getCurrentChunkMs()
+        setLastResumeTimeMs(null)
+        val totalMs = _accumulatedSessionTimeMs.value + chunkMs
+        _accumulatedSessionTimeMs.value = totalMs
+        val totalSecs = (totalMs / 1000).toInt()
+        _stopwatchSeconds.value = totalSecs
+        _cumulativeSessionFocusSeconds.value = totalSecs
+        savedStopwatchSeconds = totalSecs
+        
+        stopwatchJob?.cancel()
+        stopwatchJob = null
+        _isStopwatchActive.value = false
+        
+        _isPaused.value = false
+        _isFocusPhase.value = false
+        _wasStartedFromStopwatch.value = true
+        
+        val breakMins = prefs.getInt("stopwatch_break_duration", _stopwatchBreakDurationMinutes.value.coerceAtLeast(1)).coerceAtLeast(1)
+        _timerSecondsLeft.value = breakMins * 60
+        
+        prefs.edit()
+            .putBoolean("was_started_from_stopwatch", true)
+            .putInt("saved_stopwatch_seconds", savedStopwatchSeconds)
+            .putBoolean("timer_is_stopwatch_active", false)
+            .putBoolean("timer_is_running", true)
+            .putBoolean("is_paused", false)
+            .apply()
+
         val email = com.example.api.DynamicCommandManager.activeEmail
         if (email.isNotEmpty()) {
             val timeline = com.example.api.DynamicCommandManager.currentTimelineFlow.value
@@ -2111,22 +2234,6 @@ object FocusTimerManager {
             val tag = _attachedTag.value.ifEmpty { "Study" }
             com.example.api.DynamicCommandManager.executeMidSessionCommand("break_started", timeline, "stopwatch", task, tag)
         }
-        
-        pauseStopwatch(context)
-        
-        // CRITICAL: Save exact stopwatch elapsed time after pausing and committing the chunk!
-        savedStopwatchSeconds = _stopwatchSeconds.value
-        
-        _isPaused.value = false
-        _isFocusPhase.value = false
-        _wasStartedFromStopwatch.value = true
-        val prefs = context.applicationContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean("was_started_from_stopwatch", true)
-            .putInt("saved_stopwatch_seconds", savedStopwatchSeconds)
-            .apply()
-        
-        _timerSecondsLeft.value = _stopwatchBreakDurationMinutes.value * 60
         
         KeepAliveService.updateNotification(context)
         appendTimelineEvent(context, "BREAK START")
@@ -2141,6 +2248,36 @@ object FocusTimerManager {
         updateLocalInteractionTimestamp()
         stopAlarm()
 
+        val appContext = context.applicationContext
+        val prefs = appContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+
+        // Finalize focus chunk locally without sending a "paused" command to RTDB
+        val chunkMs = getCurrentChunkMs()
+        setLastResumeTimeMs(null)
+        val totalMs = _accumulatedSessionTimeMs.value + chunkMs
+        val elapsedSecs = (totalMs / 1000).toInt()
+        if (elapsedSecs > 0) {
+            persistFocusSession(context, elapsedSecs, isTimer = true)
+        }
+        _cumulativeSessionFocusSeconds.value = 0
+        _accumulatedSessionTimeMs.value = 0L
+        
+        timerJob?.cancel()
+        timerJob = null
+        _isTimerRunning.value = false
+        _isPaused.value = false
+        _isFocusPhase.value = false
+        _wasStartedFromStopwatch.value = false
+        
+        val bMins = prefs.getInt("break_duration", 5).coerceAtLeast(1)
+        _timerSecondsLeft.value = bMins * 60
+        
+        prefs.edit()
+            .putBoolean("was_started_from_stopwatch", false)
+            .putBoolean("timer_is_running", true)
+            .putBoolean("is_paused", false)
+            .apply()
+
         val email = com.example.api.DynamicCommandManager.activeEmail
         if (email.isNotEmpty()) {
             val timeline = com.example.api.DynamicCommandManager.currentTimelineFlow.value
@@ -2148,25 +2285,6 @@ object FocusTimerManager {
             val tag = _attachedTag.value.ifEmpty { "Study" }
             com.example.api.DynamicCommandManager.executeMidSessionCommand("break_started", timeline, "pomodoro", task, tag)
         }
-
-        pauseTimer(context)
-        
-        val elapsedSecs = _cumulativeSessionFocusSeconds.value
-        if (elapsedSecs > 0) {
-            persistFocusSession(context, elapsedSecs, isTimer = true)
-            _cumulativeSessionFocusSeconds.value = 0
-            _accumulatedSessionTimeMs.value = 0L
-            setLastResumeTimeMs(null)
-        }
-        
-        _isPaused.value = false
-        _isFocusPhase.value = false
-        _wasStartedFromStopwatch.value = false
-        val prefs = context.applicationContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        prefs.edit().putBoolean("was_started_from_stopwatch", false).apply()
-        
-        val bMins = prefs.getInt("break_duration", 5)
-        _timerSecondsLeft.value = bMins * 60
         
         KeepAliveService.updateNotification(context)
         appendTimelineEvent(context, "BREAK START")
@@ -2233,6 +2351,7 @@ object FocusTimerManager {
     fun startStopwatch(context: Context, stopActiveAlarm: Boolean = true, isResuming: Boolean = false, resumeFromBreak: Boolean = false) {
         init(context)
         claimCommandDevice(context)
+        stopMinusTimer()
         val appContext = context.applicationContext
         
         if (_isTimerRunning.value) {
@@ -3342,7 +3461,7 @@ object FocusTimerManager {
         }
     }
 
-    private fun updateOverlayTextAndState() {
+    fun updateOverlayTextAndState() {
         scope.launch(Dispatchers.Main) {
             overlayView?.let { view ->
                 val wm = windowManager
@@ -3368,19 +3487,36 @@ object FocusTimerManager {
                 }
             }
 
-            val displaySeconds = if (!isFocusPhase.value) {
-                timerSecondsLeft.value // Show break countdown (both Pomodoro and Stopwatch break)
-            } else if (isStopwatchActive.value) {
-                stopwatchSeconds.value
-            } else if (isTimerRunning.value) {
-                timerSecondsLeft.value
-            } else if (!isTabFocusTimerSelected.value) {
-                stopwatchSeconds.value
+            if (isMinusTimerActive.value) {
+                val sec = minusTimerSeconds.value
+                val hours = sec / 3600
+                val mins = (sec % 3600) / 60
+                val secs = sec % 60
+                val timeStr = if (hours > 0) {
+                    String.format(java.util.Locale.US, "-%02d:%02d:%02d", hours, mins, secs)
+                } else {
+                    String.format(java.util.Locale.US, "-%02d:%02d", mins, secs)
+                }
+                tvTimerText?.let { textView ->
+                    textView.text = timeStr
+                    textView.setTextColor(android.graphics.Color.parseColor("#EF5350"))
+                }
             } else {
-                timerSecondsLeft.value
-            }
-            tvTimerText?.let { textView ->
-                textView.text = formatTime(displaySeconds)
+                val displaySeconds = if (!isFocusPhase.value) {
+                    timerSecondsLeft.value // Show break countdown (both Pomodoro and Stopwatch break)
+                } else if (isStopwatchActive.value) {
+                    stopwatchSeconds.value
+                } else if (isTimerRunning.value) {
+                    timerSecondsLeft.value
+                } else if (!isTabFocusTimerSelected.value) {
+                    stopwatchSeconds.value
+                } else {
+                    timerSecondsLeft.value
+                }
+                tvTimerText?.let { textView ->
+                    textView.text = formatTime(displaySeconds)
+                    textView.setTextColor(android.graphics.Color.WHITE)
+                }
             }
             updateBlinkingAnimations()
             tvPauseBtn?.let { btn ->

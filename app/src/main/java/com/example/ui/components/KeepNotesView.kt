@@ -83,6 +83,60 @@ fun KeepNotesView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     var isRecordingAudio by remember { mutableStateOf(false) }
     var currentAudioRecordingFile by remember { mutableStateOf<File?>(null) }
 
+    val openNoteDetails = { note: KeepNote ->
+        noteToEdit = note
+        inputTitle = note.title
+        inputColorHex = note.colorHex
+        inputIsPinned = note.isPinned
+
+        // Parse attachments list from content
+        val match = Regex("""\[Attachments: ([^\]]+)\]""").find(note.content)
+        val attachmentsList = if (match != null) {
+            match.groupValues[1].split(";;").filter { it.isNotEmpty() }
+        } else {
+            val oldMatch = Regex("""\[Attachment: ([^\]]+)\]""").find(note.content)
+            val oldAtt = oldMatch?.groupValues?.get(1)?.trim() ?: ""
+            if (oldAtt.isNotEmpty()) {
+                val lower = oldAtt.lowercase()
+                val typePrefix = when {
+                    lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp") -> "photo:"
+                    lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".3gp") || lower.endsWith(".mkv") -> "video:"
+                    lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".wav") || lower.endsWith(".aac") -> "audio:"
+                    else -> "file:${oldAtt}|path:"
+                }
+                val sandboxFile = java.io.File(context.filesDir, oldAtt)
+                if (sandboxFile.exists()) {
+                    listOf("${typePrefix}${sandboxFile.absolutePath}")
+                } else {
+                    listOf("${typePrefix}${oldAtt}")
+                }
+            } else {
+                emptyList()
+            }
+        }
+        inputAttachments = attachmentsList
+
+        // Clean content
+        val cleanContent = note.content
+            .replace(Regex("""\n?\[Attachments: [^\]]+\]"""), "")
+            .replace(Regex("""\n?\[Attachment: [^\]]+\]"""), "")
+            .trim()
+
+        inputContentValue = TextFieldValue(text = cleanContent)
+        showEditorScreen = true
+    }
+
+    val externalSelectedId by viewModel.selectedNoteId.collectAsState()
+    LaunchedEffect(externalSelectedId, notes) {
+        externalSelectedId?.let { idVal ->
+            val note = notes.find { it.id == idVal }
+            if (note != null) {
+                openNoteDetails(note)
+                viewModel.clearSelectedNoteId()
+            }
+        }
+    }
+
     // Permissions Request launcher
     val requestPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -783,48 +837,7 @@ fun KeepNotesView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                             items(pinnedNotes) { note ->
                                 NoteCard(
                                     note = note,
-                                    onClick = {
-                                        noteToEdit = note
-                                        inputTitle = note.title
-                                        inputColorHex = note.colorHex
-                                        inputIsPinned = note.isPinned
-
-                                        // Parse attachments list from content
-                                        val match = Regex("""\[Attachments: ([^\]]+)\]""").find(note.content)
-                                        val attachmentsList = if (match != null) {
-                                            match.groupValues[1].split(";;").filter { it.isNotEmpty() }
-                                        } else {
-                                            val oldMatch = Regex("""\[Attachment: ([^\]]+)\]""").find(note.content)
-                                            val oldAtt = oldMatch?.groupValues?.get(1)?.trim() ?: ""
-                                            if (oldAtt.isNotEmpty()) {
-                                                val lower = oldAtt.lowercase()
-                                                val typePrefix = when {
-                                                    lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp") -> "photo:"
-                                                    lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".3gp") || lower.endsWith(".mkv") -> "video:"
-                                                    lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".wav") || lower.endsWith(".aac") -> "audio:"
-                                                    else -> "file:${oldAtt}|path:"
-                                                }
-                                                val sandboxFile = java.io.File(context.filesDir, oldAtt)
-                                                if (sandboxFile.exists()) {
-                                                    listOf("${typePrefix}${sandboxFile.absolutePath}")
-                                                } else {
-                                                    listOf("${typePrefix}${oldAtt}")
-                                                }
-                                            } else {
-                                                emptyList()
-                                            }
-                                        }
-                                        inputAttachments = attachmentsList
-
-                                        // Clean content
-                                        val cleanContent = note.content
-                                            .replace(Regex("""\n?\[Attachments: [^\]]+\]"""), "")
-                                            .replace(Regex("""\n?\[Attachment: [^\]]+\]"""), "")
-                                            .trim()
-
-                                        inputContentValue = TextFieldValue(text = cleanContent)
-                                        showEditorScreen = true
-                                    },
+                                    onClick = { openNoteDetails(note) },
                                     onPinClick = {
                                         viewModel.updateKeepNote(note.copy(isPinned = !note.isPinned))
                                     },
@@ -851,48 +864,7 @@ fun KeepNotesView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                             items(otherNotes) { note ->
                                 NoteCard(
                                     note = note,
-                                    onClick = {
-                                        noteToEdit = note
-                                        inputTitle = note.title
-                                        inputColorHex = note.colorHex
-                                        inputIsPinned = note.isPinned
-
-                                        // Parse attachments list from content
-                                        val match = Regex("""\[Attachments: ([^\]]+)\]""").find(note.content)
-                                        val attachmentsList = if (match != null) {
-                                            match.groupValues[1].split(";;").filter { it.isNotEmpty() }
-                                        } else {
-                                            val oldMatch = Regex("""\[Attachment: ([^\]]+)\]""").find(note.content)
-                                            val oldAtt = oldMatch?.groupValues?.get(1)?.trim() ?: ""
-                                            if (oldAtt.isNotEmpty()) {
-                                                val lower = oldAtt.lowercase()
-                                                val typePrefix = when {
-                                                    lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp") -> "photo:"
-                                                    lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".3gp") || lower.endsWith(".mkv") -> "video:"
-                                                    lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".wav") || lower.endsWith(".aac") -> "audio:"
-                                                    else -> "file:${oldAtt}|path:"
-                                                }
-                                                val sandboxFile = java.io.File(context.filesDir, oldAtt)
-                                                if (sandboxFile.exists()) {
-                                                    listOf("${typePrefix}${sandboxFile.absolutePath}")
-                                                } else {
-                                                    listOf("${typePrefix}${oldAtt}")
-                                                }
-                                            } else {
-                                                emptyList()
-                                            }
-                                        }
-                                        inputAttachments = attachmentsList
-
-                                        // Clean content
-                                        val cleanContent = note.content
-                                            .replace(Regex("""\n?\[Attachments: [^\]]+\]"""), "")
-                                            .replace(Regex("""\n?\[Attachment: [^\]]+\]"""), "")
-                                            .trim()
-
-                                        inputContentValue = TextFieldValue(text = cleanContent)
-                                        showEditorScreen = true
-                                    },
+                                    onClick = { openNoteDetails(note) },
                                     onPinClick = {
                                         viewModel.updateKeepNote(note.copy(isPinned = !note.isPinned))
                                     },

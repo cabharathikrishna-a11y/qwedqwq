@@ -90,7 +90,7 @@ fun TaskEngineView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     var selectedTaskForActionConfig by remember { mutableStateOf<Task?>(null) }
 
     val extSelectedTaskId by viewModel.selectedTaskId.collectAsStateWithLifecycle()
-    LaunchedEffect(extSelectedTaskId) {
+    LaunchedEffect(extSelectedTaskId, tasks) {
         extSelectedTaskId?.let { idVal ->
             val found = tasks.find { it.id == idVal }
             if (found != null) {
@@ -140,6 +140,7 @@ fun TaskEngineView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     // Selection mode parameters (select tasks bulk operations)
     var isSelectionMode by remember { mutableStateOf(false) }
     var selectedTaskIds by remember { mutableStateOf(setOf<Int>()) }
+    var showDeleteSelectedTasksDialog by remember { mutableStateOf(false) }
     var expandedTaskIds by remember { mutableStateOf(setOf<Int>()) }
     var draggedItemId by remember { mutableStateOf<Int?>(null) }
     var dragOffsetY by remember { mutableStateOf(0f) }
@@ -158,13 +159,22 @@ fun TaskEngineView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     val activeCustomList = customLists.find { it.name.equals(selectedList, ignoreCase = true) }
     val activeListColor = activeCustomList?.let { parseColorHex(it.colorHex) } ?: WaterBlue
 
-    // Raw matching tasks
+    // Raw matching tasks (excluding festival & holiday events which belong exclusively in Calendar)
     var currentFiltered = tasks.filter { task ->
-        when (selectedList) {
-            "All" -> true
-            "Today" -> task.dueDateString == todayStr
-            "Next 7 Days" -> task.dueDateString in next7DaysStrings
-            else -> task.listCategory.equals(selectedList, ignoreCase = true)
+        val isHolidayOrFestivalEvent = com.example.util.GoogleCalendarSyncHelper.isHolidayOrFestival(
+            task.title,
+            task.description,
+            task.listCategory
+        )
+        if (isHolidayOrFestivalEvent) {
+            false
+        } else {
+            when (selectedList) {
+                "All" -> true
+                "Today" -> task.dueDateString == todayStr
+                "Next 7 Days" -> task.dueDateString in next7DaysStrings
+                else -> task.listCategory.equals(selectedList, ignoreCase = true)
+            }
         }
     }
 
@@ -807,6 +817,117 @@ fun TaskEngineView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Select all tasks tick box banner when selection mode is active
+            if (isSelectionMode) {
+                val areAllSelected = filteredList.isNotEmpty() && selectedTaskIds.size >= filteredList.size
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2433)),
+                    border = BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clickable {
+                                    if (areAllSelected) {
+                                        selectedTaskIds = emptySet()
+                                    } else {
+                                        selectedTaskIds = filteredList.map { it.id }.toSet()
+                                    }
+                                }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Checkbox(
+                                checked = areAllSelected,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        selectedTaskIds = filteredList.map { it.id }.toSet()
+                                    } else {
+                                        selectedTaskIds = emptySet()
+                                    }
+                                },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = Color(0xFF2563EB),
+                                    uncheckedColor = Color(0xFF94A3B8),
+                                    checkmarkColor = Color.White
+                                ),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text(
+                                    text = "Select all tasks",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${selectedTaskIds.size} of ${filteredList.size} tasks selected",
+                                    color = Color(0xFF93C5FD),
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (selectedTaskIds.isNotEmpty()) {
+                                Button(
+                                    onClick = {
+                                        showDeleteSelectedTasksDialog = true
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete Selected",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (areAllSelected) "Delete All" else "Delete (${selectedTaskIds.size})",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    isSelectionMode = false
+                                    selectedTaskIds = emptySet()
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Exit Selection",
+                                    tint = Color(0xFF94A3B8),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // Task List (Rendered dynamically using grouped and sorted tasks)
             if (filteredList.isEmpty()) {
                 Box(
@@ -1403,12 +1524,9 @@ fun TaskEngineView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
 
                         // Bulk Delete action
                         IconButton(onClick = {
-                            val targetTasks = filteredList.filter { selectedTaskIds.contains(it.id) }
-                            targetTasks.forEach { t ->
-                                viewModel.deleteTask(t)
+                            if (selectedTaskIds.isNotEmpty()) {
+                                showDeleteSelectedTasksDialog = true
                             }
-                            isSelectionMode = false
-                            selectedTaskIds = emptySet()
                         }) {
                             Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color(0xFFF9325D))
                         }
@@ -1430,6 +1548,56 @@ fun TaskEngineView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
             }
         }
             }
+        }
+
+        // Delete confirmation dialog when deleting selected or all tasks
+        if (showDeleteSelectedTasksDialog) {
+            val countToDelete = selectedTaskIds.size
+            val isDeletingAll = countToDelete >= filteredList.size && filteredList.isNotEmpty()
+            AlertDialog(
+                onDismissRequest = { showDeleteSelectedTasksDialog = false },
+                title = {
+                    Text(
+                        text = if (isDeletingAll) "Delete All Tasks?" else "Delete $countToDelete Selected Task${if (countToDelete > 1) "s" else ""}?",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                },
+                text = {
+                    Text(
+                        text = if (isDeletingAll) {
+                            "Are you sure you want to permanently delete all $countToDelete tasks in this list? This action cannot be undone."
+                        } else {
+                            "Are you sure you want to permanently delete these $countToDelete selected task${if (countToDelete > 1) "s" else ""}? This action cannot be undone."
+                        },
+                        color = Color(0xFFCBD5E1),
+                        fontSize = 13.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val targetTasks = tasks.filter { selectedTaskIds.contains(it.id) }
+                            targetTasks.forEach { t ->
+                                viewModel.deleteTask(t)
+                            }
+                            isSelectionMode = false
+                            selectedTaskIds = emptySet()
+                            showDeleteSelectedTasksDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                    ) {
+                        Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteSelectedTasksDialog = false }) {
+                        Text("Cancel", color = Color(0xFF94A3B8))
+                    }
+                },
+                containerColor = Color(0xFF1E293B)
+            )
         }
 
         if (!isWide) {
@@ -6569,7 +6737,9 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                             val hasAnyAllDayThisWeek = weekDates.any { date ->
                                 val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(date)
                                 tasks.any { it.dueDateString == dateStr && isTaskAllDay(it) } ||
-                                systemCalendarEvents.any { it.dateStr == dateStr && it.isAllDay }
+                                systemCalendarEvents.any { it.dateStr == dateStr && it.isAllDay } ||
+                                getContactBirthdaysForDate(contacts, date).isNotEmpty() ||
+                                getContactAnniversariesForDate(contacts, date).isNotEmpty()
                             }
 
                             if (hasAnyAllDayThisWeek) {
@@ -6604,6 +6774,8 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                             val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(date)
                                             val dayAllDayTasks = tasks.filter { it.dueDateString == dateStr && isTaskAllDay(it) }
                                             val dayAllDayEvents = systemCalendarEvents.filter { it.dateStr == dateStr && it.isAllDay }
+                                            val dayBirthdaysThisWeek = getContactBirthdaysForDate(contacts, date)
+                                            val dayAnniversariesThisWeek = getContactAnniversariesForDate(contacts, date)
 
                                             Column(
                                                 modifier = Modifier
@@ -6611,17 +6783,61 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                                     .padding(horizontal = 2.dp),
                                                 verticalArrangement = Arrangement.spacedBy(2.dp)
                                             ) {
-                                                dayAllDayEvents.forEach { event ->
+                                                // Contact Birthdays (All Day)
+                                                dayBirthdaysThisWeek.forEach { bdayContact ->
                                                     Box(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .clip(RoundedCornerShape(3.dp))
-                                                            .background(Color(0xFF81D4FA).copy(alpha = 0.25f))
-                                                            .border(0.5.dp, Color(0xFF81D4FA).copy(alpha = 0.7f), RoundedCornerShape(3.dp))
+                                                            .background(Color(0xFFEC407A).copy(alpha = 0.25f))
+                                                            .border(0.5.dp, Color(0xFFEC407A).copy(alpha = 0.7f), RoundedCornerShape(3.dp))
                                                             .padding(horizontal = 3.dp, vertical = 2.dp)
                                                     ) {
                                                         Text(
-                                                            text = event.title,
+                                                            text = "🎂 ${getContactDisplayName(bdayContact)}",
+                                                            color = Color(0xFFF8BBD0),
+                                                            fontSize = 8.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                }
+
+                                                // Contact Anniversaries (All Day)
+                                                dayAnniversariesThisWeek.forEach { annivContact ->
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(3.dp))
+                                                            .background(Color(0xFFAB47BC).copy(alpha = 0.25f))
+                                                            .border(0.5.dp, Color(0xFFAB47BC).copy(alpha = 0.7f), RoundedCornerShape(3.dp))
+                                                            .padding(horizontal = 3.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "💍 ${getContactDisplayName(annivContact)}",
+                                                            color = Color(0xFFE1BEE7),
+                                                            fontSize = 8.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                }
+
+                                                dayAllDayEvents.forEach { event ->
+                                                    val isFestival = event.isHolidayOrFestival
+                                                    val eventColor = if (isFestival) Color(0xFFAB47BC) else Color(0xFF81D4FA)
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(3.dp))
+                                                            .background(eventColor.copy(alpha = 0.25f))
+                                                            .border(0.5.dp, eventColor.copy(alpha = 0.7f), RoundedCornerShape(3.dp))
+                                                            .padding(horizontal = 3.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = if (isFestival) "🎉 ${event.title}" else event.title,
                                                             color = Color.White,
                                                             fontSize = 8.sp,
                                                             fontWeight = FontWeight.SemiBold,
@@ -6942,6 +7158,76 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
 
                             val currentDayBirthdays = getContactBirthdaysForDate(contacts, selectedMonthCalendar.time)
                             val currentDayAnniversaries = getContactAnniversariesForDate(contacts, selectedMonthCalendar.time)
+                            val currentDayHolidays = systemCalendarEvents.filter { event ->
+                                event.dateStr == activeDateStr && event.isHolidayOrFestival &&
+                                currentDayBirthdays.none { bday ->
+                                    val name = "${bday.firstName} ${bday.lastName}".trim()
+                                    name.isNotEmpty() && event.title.contains(name, ignoreCase = true)
+                                }
+                            }
+
+                            if (currentDayHolidays.isNotEmpty()) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    currentDayHolidays.forEach { holiday ->
+                                        val isBdayEvent = holiday.title.contains("birthday", ignoreCase = true) ||
+                                                holiday.calendarDisplayName.contains("birthday", ignoreCase = true)
+                                        val cardBg = if (isBdayEvent) Color(0xFF331524) else Color(0xFF2C1E38)
+                                        val cardBorder = if (isBdayEvent) Color(0xFFEC407A).copy(alpha = 0.6f) else Color(0xFFAB47BC).copy(alpha = 0.6f)
+                                        val subtitleColor = if (isBdayEvent) Color(0xFFF48FB1) else Color(0xFFCE93D8)
+                                        val badgeBg = if (isBdayEvent) Color(0xFFEC407A).copy(alpha = 0.3f) else Color(0xFFAB47BC).copy(alpha = 0.3f)
+                                        val badgeTextColor = if (isBdayEvent) Color(0xFFF8BBD0) else Color(0xFFE1BEE7)
+                                        val iconText = if (isBdayEvent) "🎂" else "🎉"
+
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = CardDefaults.cardColors(containerColor = cardBg),
+                                            border = BorderStroke(1.dp, cardBorder),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                    Text(iconText, fontSize = 20.sp)
+                                                    Spacer(modifier = Modifier.width(10.dp))
+                                                    Column {
+                                                        Text(holiday.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                        Text(
+                                                            text = if (holiday.calendarDisplayName.isNotEmpty() && holiday.calendarDisplayName != "Calendar") {
+                                                                "All Day • ${holiday.calendarDisplayName}"
+                                                            } else if (isBdayEvent) {
+                                                                "All Day • Birthday"
+                                                            } else {
+                                                                "All Day • Festival"
+                                                            },
+                                                            color = subtitleColor,
+                                                            fontSize = 11.sp
+                                                        )
+                                                        if (holiday.description.isNotEmpty()) {
+                                                            Text(holiday.description, color = Color.LightGray, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                                        }
+                                                    }
+                                                }
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(badgeBg)
+                                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("All Day", color = badgeTextColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
                             if (currentDayBirthdays.isNotEmpty() || currentDayAnniversaries.isNotEmpty()) {
                                 Column(
@@ -6975,7 +7261,7 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                                     Spacer(modifier = Modifier.width(10.dp))
                                                     Column {
                                                         Text(getContactDisplayName(contact), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                                        Text(ageStr, color = Color(0xFFF48FB1), fontSize = 11.sp)
+                                                        Text("All Day • $ageStr", color = Color(0xFFF48FB1), fontSize = 11.sp)
                                                         if (contact.jobTitle.isNotBlank()) {
                                                             Text(contact.jobTitle, color = Color.Gray, fontSize = 10.sp)
                                                         }
@@ -6987,7 +7273,7 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                                         .background(Color(0xFFEC407A).copy(alpha = 0.3f))
                                                         .padding(horizontal = 8.dp, vertical = 4.dp)
                                                 ) {
-                                                    Text("Birthday", color = Color(0xFFF8BBD0), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    Text("All Day", color = Color(0xFFF8BBD0), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                                 }
                                             }
                                         }
@@ -7029,7 +7315,7 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
 
                             // ALL-DAY TASKS SECTION (Above the Timeline)
                             val dayAllDayTasks = dayTasks.filter { isTaskAllDay(it) }
-                            val dayAllDayEvents = systemCalendarEvents.filter { it.dateStr == activeDateStr && it.isAllDay }
+                            val dayAllDayEvents = systemCalendarEvents.filter { it.dateStr == activeDateStr && it.isAllDay && !it.isHolidayOrFestival }
 
                             if (dayAllDayTasks.isNotEmpty() || dayAllDayEvents.isNotEmpty()) {
                                 Card(
@@ -7739,7 +8025,7 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Column {
                                             Text(getContactDisplayName(contact), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                            Text(ageStr, color = Color(0xFFF48FB1), fontSize = 10.sp)
+                                            Text("All Day • $ageStr", color = Color(0xFFF48FB1), fontSize = 10.sp)
                                             if (contact.jobTitle.isNotBlank()) {
                                                 Text(contact.jobTitle, color = Color.Gray, fontSize = 9.sp)
                                             }
@@ -7751,7 +8037,7 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                             .background(Color(0xFFEC407A).copy(alpha = 0.3f))
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
-                                        Text("Birthday", color = Color(0xFFF8BBD0), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text("All Day", color = Color(0xFFF8BBD0), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -7810,9 +8096,15 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Column {
                                             Text(holiday.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                            if (holiday.calendarDisplayName.isNotEmpty()) {
-                                                Text(holiday.calendarDisplayName, color = Color(0xFFCE93D8), fontSize = 10.sp)
-                                            }
+                                            Text(
+                                                text = if (holiday.calendarDisplayName.isNotEmpty() && holiday.calendarDisplayName != "Calendar") {
+                                                    "All Day • ${holiday.calendarDisplayName}"
+                                                } else {
+                                                    "All Day"
+                                                },
+                                                color = Color(0xFFCE93D8),
+                                                fontSize = 10.sp
+                                            )
                                         }
                                     }
                                     Box(
@@ -7821,7 +8113,7 @@ fun CalendarView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                             .background(Color(0xFF8E24AA).copy(alpha = 0.3f))
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
-                                        Text("Holiday", color = Color(0xFFE1BEE7), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text("All Day", color = Color(0xFFE1BEE7), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }

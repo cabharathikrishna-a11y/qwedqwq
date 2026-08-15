@@ -609,16 +609,22 @@ object GoogleCalendarSyncHelper {
         val lowerAcc = accountName.lowercase(Locale.ROOT).trim()
         val lowerDisp = displayName.lowercase(Locale.ROOT).trim()
         return lowerDisp.contains("holiday") || lowerDisp.contains("festival") || lowerDisp.contains("vacation") ||
-               lowerDisp.contains("birthday") || lowerAcc.contains("#holiday@") || lowerAcc.contains("group.v.calendar.google.com") ||
-               lowerAcc.contains("addressbook#contacts")
+               lowerDisp.contains("birthday") || lowerDisp.contains("birthdays") || lowerDisp.contains("contact") ||
+               lowerDisp.contains("observance") || lowerDisp.contains("festiv") ||
+               lowerDisp.contains("panchang") || lowerDisp.contains("tithi") || lowerDisp.contains("cultural") ||
+               lowerAcc.contains("#holiday@") || lowerAcc.contains("holiday@") || lowerAcc.contains("group.v.calendar.google.com") ||
+               lowerAcc.contains("addressbook#contacts") || lowerAcc.contains("contact") || lowerAcc.contains("birthday") ||
+               lowerAcc.contains("festiv")
     }
 
-    fun isHolidayOrFestival(title: String, description: String = "", calendarName: String = ""): Boolean {
-        if (calendarName.isNotEmpty() && isHolidayCalendar("", calendarName)) return true
+    fun isHolidayOrFestival(title: String, description: String = "", calendarName: String = "", accountName: String = ""): Boolean {
+        if (calendarName.isNotEmpty() && isHolidayCalendar(accountName, calendarName)) return true
+        if (accountName.isNotEmpty() && isHolidayCalendar(accountName, "")) return true
         val lowerTitle = title.lowercase(Locale.ROOT).trim()
         val lowerDesc = description.lowercase(Locale.ROOT).trim()
 
         val keywords = listOf(
+            "birthday", "birthdays", "b'day", "bday", "anniversary", "anniversaries",
             "holiday", "festival", "festivals", "diwali", "deepavali", "christmas", "xmas", "eid", "holi",
             "independence day", "republic day", "gandhi jayanti", "thanksgiving", "new year", "good friday",
             "labor day", "labour day", "memorial day", "columbus day", "veterans day", "martin luther king", "presidents' day",
@@ -628,7 +634,13 @@ object GoogleCalendarSyncHelper {
             "st. patrick", "boxing day", "patriots' day", "flag day", "juneteenth", "indigenous peoples' day",
             "kwanzaa", "hanukkah", "passover", "rosh hashanah", "yom kippur", "vesak", "buddha purnima",
             "guru nanak", "mahavir jayanti", "milad un nabi", "muharram", "ashura", "public holiday", "bank holiday",
-            "national holiday", "observance", "season's greetings"
+            "national holiday", "observance", "season's greetings", "vishu", "bihu", "lohri", "chaitra navratri",
+            "ramadan", "eid ul-fitr", "eid al-fitr", "bakrid", "eid al-adha", "shab-e-barat", "milad-un-nabi",
+            "durga ashtami", "maha navami", "vijayadashami", "kartik purnima", "guru gobind singh", "christmas eve",
+            "new year's eve", "new year's day", "may day", "earth day", "international women's day", "mothers day",
+            "fathers day", "childrens day", "teachers day", "panchang", "tithi", "ekadashi", "amavasya", "purnima",
+            "sankranti", "pradosh", "navami", "ashtami", "chaturdashi", "jayanti", "utsav", "carnival", "solstice",
+            "equinox", "national day", "commemoration", "federal holiday"
         )
 
         for (kw in keywords) {
@@ -647,7 +659,7 @@ object GoogleCalendarSyncHelper {
     ) {
         for (task in localTasks) {
             val isFromGCal = task.description.contains("[GCalEventId:") || task.listCategory == "Google Calendar"
-            if (isFromGCal && isHolidayOrFestival(task.title, task.description)) {
+            if (isFromGCal && isHolidayOrFestival(task.title, task.description, task.listCategory)) {
                 Log.d(TAG, "Purging existing holiday task: '${task.title}' (ID: ${task.id})")
                 try {
                     onDeleteTask(task)
@@ -668,18 +680,23 @@ object GoogleCalendarSyncHelper {
         val events = mutableListOf<SystemCalendarEvent>()
         val resolver = context.contentResolver
 
-        val calendarMap = mutableMapOf<Long, String>()
+        val calendarMap = mutableMapOf<Long, Pair<String, String>>()
         try {
             val calCursor = resolver.query(
                 CalendarContract.Calendars.CONTENT_URI,
-                arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME),
+                arrayOf(
+                    CalendarContract.Calendars._ID,
+                    CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                    CalendarContract.Calendars.ACCOUNT_NAME
+                ),
                 null, null, null
             )
             calCursor?.use {
                 while (it.moveToNext()) {
                     val calId = it.getLong(0)
                     val name = it.getString(1) ?: ""
-                    calendarMap[calId] = name
+                    val acc = it.getString(2) ?: ""
+                    calendarMap[calId] = Pair(name, acc)
                 }
             }
         } catch (e: Exception) {
@@ -717,10 +734,10 @@ object GoogleCalendarSyncHelper {
                     val dtEnd = it.getLong(4)
                     val allDay = (it.getInt(5) == 1)
                     val calId = it.getLong(6)
-                    val calName = calendarMap[calId] ?: ""
+                    val (calName, calAcc) = calendarMap[calId] ?: Pair("", "")
 
                     val dateStr = sdfDate.format(Date(dtStart))
-                    val isHoliday = isHolidayOrFestival(title, description, calName)
+                    val isHoliday = isHolidayOrFestival(title, description, calName, calAcc)
 
                     events.add(
                         SystemCalendarEvent(
@@ -729,9 +746,9 @@ object GoogleCalendarSyncHelper {
                             description = description,
                             startMillis = dtStart,
                             endMillis = dtEnd,
-                            isAllDay = allDay,
+                            isAllDay = if (isHoliday) true else allDay,
                             dateStr = dateStr,
-                            calendarDisplayName = calName,
+                            calendarDisplayName = if (calName.isNotEmpty()) calName else "Calendar",
                             isHolidayOrFestival = isHoliday
                         )
                     )

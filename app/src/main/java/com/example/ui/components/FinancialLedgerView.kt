@@ -94,6 +94,18 @@ fun FinancialLedgerView(viewModel: AppViewModel, modifier: Modifier = Modifier) 
     var isGeneratingAiReport by remember { mutableStateOf(false) }
     var showTransactionHistory by remember { mutableStateOf(false) }
 
+    var viewingTransaction by remember { mutableStateOf<FinanceTransaction?>(null) }
+    val externalSelectedTxId by viewModel.selectedFinanceTransactionId.collectAsStateWithLifecycle()
+    LaunchedEffect(externalSelectedTxId, txs) {
+        externalSelectedTxId?.let { idVal ->
+            val found = txs.find { it.id == idVal }
+            if (found != null) {
+                viewingTransaction = found
+                viewModel.clearSelectedFinanceTransactionId()
+            }
+        }
+    }
+
     // Helper: Compute balance for an individual account
     fun getAccountBalance(a: FinancialAccount): Double {
         val initial = a.openingValue
@@ -1927,6 +1939,84 @@ fun FinancialLedgerView(viewModel: AppViewModel, modifier: Modifier = Modifier) 
                 }
             },
             confirmButton = {}
+        )
+    }
+
+    if (viewingTransaction != null) {
+        val t = viewingTransaction!!
+        val dateStr = SimpleDateFormat("MMM dd, yyyy HH:mm:ss", Locale.getDefault()).format(Date(t.timestamp))
+        val memberName = familyMembers.find { it.id == t.memberId }?.name ?: "Unknown"
+        val fromAccName = accounts.find { it.id == t.fromAccountId }?.name ?: t.fromCategory ?: "None"
+        val toAccName = accounts.find { it.id == t.toAccountId }?.name ?: t.toCategory ?: "None"
+        val isIncome = t.type == "INCOME"
+
+        AlertDialog(
+            onDismissRequest = { viewingTransaction = null },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TRANSACTION DETAILS",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = WaterBlue
+                    )
+                    IconButton(onClick = { viewingTransaction = null }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceCard)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = t.type,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isIncome) SuccessGreen else AlertRed
+                                )
+                                Text(
+                                    text = if (isIncome) "+₹${String.format("%,.2f", t.amount)}" else "-₹${String.format("%,.2f", t.amount)}",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isIncome) SuccessGreen else AlertRed
+                                )
+                            }
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                            Text("From: $fromAccName", color = Color.White, fontSize = 13.sp)
+                            Text("To: $toAccName", color = Color.White, fontSize = 13.sp)
+                            Text("Family Member: $memberName", color = Color.LightGray, fontSize = 12.sp)
+                            Text("Date: $dateStr", color = Color.LightGray, fontSize = 12.sp)
+                            if (!t.note.isNullOrBlank()) {
+                                Text("Note: ${t.note}", color = WaterBlue, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewingTransaction = null }) {
+                    Text("OK", color = WaterBlue, fontWeight = FontWeight.Bold)
+                }
+            }
         )
     }
 }
