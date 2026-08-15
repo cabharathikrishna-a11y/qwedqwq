@@ -34,6 +34,20 @@
     <string name="widget_name_photo_shower">Journal Photo Shower</string>
     <string name="widget_desc_photo_shower">Displays random journal photos with DD/MM/YY date overlay and journal notes</string>
 
-    <string name="widget_name_quick_shortcuts">Web Apps &amp; Shortcuts</string>
-    <string name="widget_desc_quick_shortcuts">1-tap shortcuts to Instagram, YouTube, Spotify, Notes, and Tasks</string>
+    <string name="widget_name_quick_shortcuts">Web Apps Bar</string>
+    <string name="widget_desc_quick_shortcuts">Quick 1-tap shortcuts for Instagram Web, YouTube Web, and Spotify Web</string>
+
+    <string name="shortcut_timer_short">Timer</string>
+    <string name="shortcut_timer_long">Focus Timer</string>
+    <string name="shortcut_journal_short">Journal</string>
+    <string name="shortcut_journal_long">Journal Book</string>
+    <string name="shortcut_tasks_short">Tasks</string>
+    <string name="shortcut_tasks_long">Tasks</string>
+
+    <string name="shortcut_instagram_short">Instagram</string>
+    <string name="shortcut_instagram_long">Instagram Web (AntiGram)</string>
+    <string name="shortcut_youtube_short">YouTube</string>
+    <string name="shortcut_youtube_long">YouTube Web (AntiTube)</string>
+    <string name="shortcut_spotify_short">Spotify</string>
+    <string name="shortcut_spotify_long">Spotify Web (AntiSpotify)</string>
 </resources>

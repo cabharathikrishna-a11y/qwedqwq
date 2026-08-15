@@ -228,6 +228,9 @@ class MainActivity : ComponentActivity() {
             handleIncomingShareIntent(intent)
             performLaunchRedirectionCheck()
 
+            // Publish native Android dynamic app shortcuts
+            com.example.util.AppShortcutHelper.publishDynamicShortcuts(this)
+
             // Register Network Reconnection Event Listener
             try {
                 val connectivityManager = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
@@ -276,6 +279,7 @@ class MainActivity : ComponentActivity() {
                             val isWeb = tempMedia.uri.scheme?.startsWith("http") == true || com.example.util.DriveUrlUtil.isCloudPdfUrl(pathStr)
                             com.example.util.InAppPdfViewerDialog(
                                 cleanPath = pathStr,
+                                initialFileName = tempMedia.name,
                                 isWebUrl = isWeb,
                                 autoCompress = tempMedia.autoCompress,
                                 askCompressOrView = tempMedia.askCompressOrView,
@@ -361,6 +365,7 @@ class MainActivity : ComponentActivity() {
                     if (!com.example.util.AppUpdateManager.isPauseUpdatesEnabled(context)) {
                         com.example.util.AppUpdateManager.checkForUpdates(context, manualCheck = false)
                     }
+                    com.example.util.AppShortcutHelper.publishDynamicShortcuts(context)
                 }
 
                 if (isLoggedInState && showCelebrationDialog) {
@@ -1332,13 +1337,13 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
 
-                                    // Non-Essentials 3-Dot Menu Button
+                                    // Web Apps & Shortcuts Button
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .bouncyClick { showNonEssentialsMenu = true }
                                             .padding(vertical = 8.dp)
-                                            .testTag("nav_item_non_essentials"),
+                                            .testTag("nav_item_web_apps_shortcuts"),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Box(
@@ -1349,8 +1354,8 @@ class MainActivity : ComponentActivity() {
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.MoreVert,
-                                                contentDescription = "Non-Essentials",
+                                                imageVector = Icons.Default.Apps,
+                                                contentDescription = "Web Apps & Shortcuts",
                                                 tint = if (showNonEssentialsMenu) WaterBlue else Color.LightGray.copy(alpha = 0.6f),
                                                 modifier = Modifier.size(20.dp)
                                             )
@@ -1464,13 +1469,13 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
 
-                                    // Non-Essentials 3-Dot Menu Button
+                                    // Web Apps & Shortcuts Button
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .bouncyClick { showNonEssentialsMenu = true }
                                             .padding(vertical = 8.dp)
-                                            .testTag("nav_item_non_essentials"),
+                                            .testTag("nav_item_web_apps_shortcuts"),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Box(
@@ -1481,8 +1486,8 @@ class MainActivity : ComponentActivity() {
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.MoreVert,
-                                                contentDescription = "Non-Essentials",
+                                                imageVector = Icons.Default.Apps,
+                                                contentDescription = "Web Apps & Shortcuts",
                                                 tint = if (showNonEssentialsMenu) WaterBlue else Color.LightGray.copy(alpha = 0.6f),
                                                 modifier = Modifier.size(20.dp)
                                             )
@@ -1806,88 +1811,186 @@ class MainActivity : ComponentActivity() {
                     }
                 )
 
+                // Global PDF Compression Floating Progress / Complete Overlay
+                com.example.ui.components.FloatingPdfCompressionOverlay(
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    onOpenResult = { file ->
+                        com.example.util.PdfCompressorHelper.openPdfGlobally(file.absolutePath, file.name)
+                    }
+                )
+
+                val globalPdfToOpen by com.example.util.PdfCompressorHelper.globalPdfToOpen.collectAsStateWithLifecycle()
+                if (globalPdfToOpen != null) {
+                    com.example.util.InAppPdfViewerDialog(
+                        cleanPath = globalPdfToOpen!!.first,
+                        initialFileName = globalPdfToOpen!!.second,
+                        onDismiss = {
+                            com.example.util.PdfCompressorHelper.dismissGlobalPdf()
+                        }
+                    )
+                }
+
                 if (showNonEssentialsMenu) {
                     ModalBottomSheet(
                         onDismissRequest = { showNonEssentialsMenu = false },
-                        containerColor = Color(0xFF161622),
-                        contentColor = Color.White
+                        containerColor = Color(0xFF13131A),
+                        contentColor = Color.White,
+                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                                .padding(horizontal = 20.dp, vertical = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Icon(Icons.Default.MoreVert, contentDescription = null, tint = WaterBlue)
-                                Text(
-                                    text = "Non-Essentials",
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(WaterBlue.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Apps, contentDescription = null, tint = WaterBlue, modifier = Modifier.size(22.dp))
+                                }
+                                Column {
+                                    Text(
+                                        text = "Web Apps & Shortcuts",
+                                        fontSize = 19.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "Distraction-free web apps with individual home screen shortcuts",
+                                        fontSize = 11.sp,
+                                        color = Color.Gray
+                                    )
+                                }
                             }
 
-                            Text(
-                                text = "Select a module to open:",
-                                fontSize = 12.sp,
-                                color = Color.Gray
+                            // List of strictly Web Apps only
+                            val webAppsList = listOf(
+                                Triple("Instagram Web", "AntiGram distraction-free feed & direct messages", Screen.INSTAGRAM_WEB_APP),
+                                Triple("YouTube Web", "Ad-free background audio streaming", Screen.YOUTUBE_WEB_APP),
+                                Triple("Spotify Web", "Spotify web music & podcast player", Screen.SPOTIFY_WEB_APP)
                             )
 
-                            val nonEssentialItems = listOf(
-                                Triple("Movie Tracker", "Track movies, TV series episodes, IMDb auto-sync & AI recs", Screen.MOVIE_TRACKER),
-                                Triple("Instagram Web", "Access Instagram web interface", Screen.INSTAGRAM_WEB_APP),
-                                Triple("YouTube Web", "Access YouTube web interface", Screen.YOUTUBE_WEB_APP),
-                                Triple("Spotify Web", "Access Spotify web player", Screen.SPOTIFY_WEB_APP)
-                            )
-
-                            nonEssentialItems.forEach { (title, desc, targetScreen) ->
+                            webAppsList.forEach { (title, desc, targetScreen) ->
                                 Surface(
-                                    color = Color.White.copy(alpha = 0.05f),
-                                    shape = RoundedCornerShape(12.dp),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            showNonEssentialsMenu = false
-                                            if (targetScreen == Screen.INSTAGRAM_WEB_APP) {
-                                                viewModel.setInstagramWebAppEnabled(true)
-                                                viewModel.setInstagramOverrideOfficialApp(true)
-                                            } else if (targetScreen == Screen.YOUTUBE_WEB_APP) {
-                                                viewModel.setYouTubeWebAppEnabled(true)
-                                                viewModel.setYouTubeOverrideOfficialApp(true)
-                                            }
-                                            viewModel.navigateTo(targetScreen)
-                                        }
+                                    color = Color(0xFF1E1E2D),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Row(
+                                    Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(14.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = when (targetScreen) {
-                                                Screen.MOVIE_TRACKER -> Icons.Default.Movie
-                                                Screen.INSTAGRAM_WEB_APP -> Icons.Default.CameraAlt
-                                                Screen.YOUTUBE_WEB_APP -> Icons.Default.PlayCircleFilled
-                                                else -> Icons.Default.MusicNote
-                                            },
-                                            contentDescription = title,
-                                            tint = if (targetScreen == Screen.MOVIE_TRACKER) Color(0xFFFFC107) else WaterBlue,
-                                            modifier = Modifier.size(24.dp)
-                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(
+                                                        when (targetScreen) {
+                                                            Screen.INSTAGRAM_WEB_APP -> Color(0xFFE1306C).copy(alpha = 0.2f)
+                                                            Screen.YOUTUBE_WEB_APP -> Color(0xFFFF0000).copy(alpha = 0.2f)
+                                                            else -> Color(0xFF1DB954).copy(alpha = 0.2f)
+                                                        }
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = when (targetScreen) {
+                                                        Screen.INSTAGRAM_WEB_APP -> Icons.Default.CameraAlt
+                                                        Screen.YOUTUBE_WEB_APP -> Icons.Default.PlayCircleFilled
+                                                        else -> Icons.Default.MusicNote
+                                                    },
+                                                    contentDescription = title,
+                                                    tint = when (targetScreen) {
+                                                        Screen.INSTAGRAM_WEB_APP -> Color(0xFFE1306C)
+                                                        Screen.YOUTUBE_WEB_APP -> Color(0xFFFF4D4D)
+                                                        else -> Color(0xFF1DB954)
+                                                    },
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                            }
 
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(title, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
-                                            Text(desc, fontSize = 11.sp, color = Color.Gray)
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(title, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
+                                                Text(desc, fontSize = 11.sp, color = Color.LightGray.copy(alpha = 0.7f), lineHeight = 14.sp)
+                                            }
                                         }
 
-                                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.Gray)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Open Web App Button
+                                            Button(
+                                                onClick = {
+                                                    showNonEssentialsMenu = false
+                                                    if (targetScreen == Screen.INSTAGRAM_WEB_APP) {
+                                                        viewModel.setInstagramWebAppEnabled(true)
+                                                        viewModel.setInstagramOverrideOfficialApp(true)
+                                                    } else if (targetScreen == Screen.YOUTUBE_WEB_APP) {
+                                                        viewModel.setYouTubeWebAppEnabled(true)
+                                                        viewModel.setYouTubeOverrideOfficialApp(true)
+                                                    }
+                                                    viewModel.navigateTo(targetScreen)
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = WaterBlue,
+                                                    contentColor = Color.Black
+                                                ),
+                                                shape = RoundedCornerShape(10.dp),
+                                                contentPadding = PaddingValues(vertical = 8.dp)
+                                            ) {
+                                                Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Open App", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            }
+
+                                            // Pin Shortcut Button
+                                            OutlinedButton(
+                                                onClick = {
+                                                    when (targetScreen) {
+                                                        Screen.INSTAGRAM_WEB_APP -> {
+                                                            com.example.util.ShortcutUtils.createInstagramShortcut(context, forcePinPrompt = true)
+                                                            android.widget.Toast.makeText(context, "Instagram shortcut pinned to Home Screen!", android.widget.Toast.LENGTH_SHORT).show()
+                                                        }
+                                                        Screen.YOUTUBE_WEB_APP -> {
+                                                            com.example.util.ShortcutUtils.createYouTubeShortcut(context, forcePinPrompt = true)
+                                                            android.widget.Toast.makeText(context, "YouTube shortcut pinned to Home Screen!", android.widget.Toast.LENGTH_SHORT).show()
+                                                        }
+                                                        Screen.SPOTIFY_WEB_APP -> {
+                                                            com.example.util.ShortcutUtils.createSpotifyShortcut(context, forcePinPrompt = true)
+                                                            android.widget.Toast.makeText(context, "Spotify shortcut pinned to Home Screen!", android.widget.Toast.LENGTH_SHORT).show()
+                                                        }
+                                                        else -> {}
+                                                    }
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                                shape = RoundedCornerShape(10.dp),
+                                                contentPadding = PaddingValues(vertical = 8.dp)
+                                            ) {
+                                                Icon(Icons.Default.PushPin, contentDescription = null, modifier = Modifier.size(16.dp), tint = WaterBlue)
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Pin Shortcut", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1974,11 +2077,17 @@ class MainActivity : ComponentActivity() {
         }
         val isOpenInstagram = intent.getBooleanExtra("OPEN_INSTAGRAM_WEB_APP", false) ||
                 intent.getStringExtra("NAVIGATE_TO")?.equals("INSTAGRAM_WEB_APP", ignoreCase = true) == true ||
-                intent.getStringExtra("navigate_to")?.equals("INSTAGRAM_WEB_APP", ignoreCase = true) == true
+                intent.getStringExtra("navigate_to")?.equals("INSTAGRAM_WEB_APP", ignoreCase = true) == true ||
+                intent.action == "com.example.action.OPEN_INSTAGRAM_WEB"
         val isOpenYouTube = intent.getBooleanExtra("OPEN_YOUTUBE_WEB_APP", false) ||
                 intent.getStringExtra("NAVIGATE_TO")?.equals("YOUTUBE_WEB_APP", ignoreCase = true) == true ||
-                intent.getStringExtra("navigate_to")?.equals("YOUTUBE_WEB_APP", ignoreCase = true) == true
-        if (!isOpenInstagram && !isOpenYouTube && (viewModel.currentScreen.value == Screen.INSTAGRAM_WEB_APP || viewModel.currentScreen.value == Screen.YOUTUBE_WEB_APP)) {
+                intent.getStringExtra("navigate_to")?.equals("YOUTUBE_WEB_APP", ignoreCase = true) == true ||
+                intent.action == "com.example.action.OPEN_YOUTUBE_WEB"
+        val isOpenSpotify = intent.getBooleanExtra("OPEN_SPOTIFY_WEB_APP", false) ||
+                intent.getStringExtra("NAVIGATE_TO")?.equals("SPOTIFY_WEB_APP", ignoreCase = true) == true ||
+                intent.getStringExtra("navigate_to")?.equals("SPOTIFY_WEB_APP", ignoreCase = true) == true ||
+                intent.action == "com.example.action.OPEN_SPOTIFY_WEB"
+        if (!isOpenInstagram && !isOpenYouTube && !isOpenSpotify && (viewModel.currentScreen.value == Screen.INSTAGRAM_WEB_APP || viewModel.currentScreen.value == Screen.YOUTUBE_WEB_APP || viewModel.currentScreen.value == Screen.SPOTIFY_WEB_APP)) {
             viewModel.navigateTo(Screen.TIMER)
         }
         checkNotificationNavigation(intent)
@@ -2078,19 +2187,50 @@ class MainActivity : ComponentActivity() {
     private fun checkNotificationNavigation(intent: Intent?) {
         if (intent == null) return
         val navigateTo = intent.getStringExtra("NAVIGATE_TO") ?: intent.getStringExtra("navigate_to")
-        if (intent.getBooleanExtra("OPEN_INSTAGRAM_WEB_APP", false) || navigateTo.equals("INSTAGRAM_WEB_APP", ignoreCase = true)) {
+        val action = intent.action
+
+        if (action == "com.example.action.OPEN_TIMER_TAB" || 
+            navigateTo.equals("TIMER", ignoreCase = true) || 
+            intent.getBooleanExtra("SHOW_TIMER_PAGE", false) || 
+            intent.getBooleanExtra("SHOW_FULL_SCREEN_TIMER", false)) {
+            viewModel.navigateTo(Screen.TIMER)
+            return
+        }
+
+        if (action == "com.example.action.OPEN_JOURNAL_TAB" || 
+            navigateTo.equals("JOURNAL", ignoreCase = true) || 
+            intent.getBooleanExtra("SHOW_JOURNAL_PAGE", false)) {
+            viewModel.navigateTo(Screen.JOURNAL)
+            return
+        }
+
+        if (action == "com.example.action.OPEN_TASKS_TAB" || 
+            navigateTo.equals("TASKS", ignoreCase = true) || 
+            intent.getBooleanExtra("SHOW_TASKS_PAGE", false)) {
+            viewModel.navigateTo(Screen.TASKS)
+            return
+        }
+
+        if (intent.getBooleanExtra("OPEN_INSTAGRAM_WEB_APP", false) || 
+            navigateTo.equals("INSTAGRAM_WEB_APP", ignoreCase = true) ||
+            action == "com.example.action.OPEN_INSTAGRAM_WEB") {
             viewModel.setInstagramWebAppEnabled(true)
             viewModel.setInstagramOverrideOfficialApp(true)
             viewModel.navigateTo(Screen.INSTAGRAM_WEB_APP)
             return
         }
-        if (intent.getBooleanExtra("OPEN_YOUTUBE_WEB_APP", false) || navigateTo.equals("YOUTUBE_WEB_APP", ignoreCase = true)) {
+        if (intent.getBooleanExtra("OPEN_YOUTUBE_WEB_APP", false) || 
+            navigateTo.equals("YOUTUBE_WEB_APP", ignoreCase = true) ||
+            action == "com.example.action.OPEN_YOUTUBE_WEB") {
             viewModel.setYouTubeWebAppEnabled(true)
             viewModel.setYouTubeOverrideOfficialApp(true)
             viewModel.navigateTo(Screen.YOUTUBE_WEB_APP)
             return
         }
-        if (intent.getBooleanExtra("OPEN_SPOTIFY_WEB_APP", false) || navigateTo.equals("SPOTIFY_WEB_APP", ignoreCase = true)) {
+        if (intent.getBooleanExtra("OPEN_SPOTIFY_WEB_APP", false) || 
+            navigateTo.equals("SPOTIFY_WEB_APP", ignoreCase = true) ||
+            action == "com.example.action.OPEN_SPOTIFY_WEB") {
+            viewModel.setSpotifyWebAppEnabled(true)
             viewModel.navigateTo(Screen.SPOTIFY_WEB_APP)
             return
         }
@@ -2117,6 +2257,8 @@ class MainActivity : ComponentActivity() {
         } else if (navigateTo.equals("NOTIFICATIONS_STUDIO", ignoreCase = true)) {
             viewModel.navigateTo(Screen.SETTINGS)
             viewModel.updateSettingsActivePage(25)
+        } else if (navigateTo.equals("JOURNAL", ignoreCase = true) || intent.getBooleanExtra("SHOW_JOURNAL_PAGE", false)) {
+            viewModel.navigateTo(Screen.JOURNAL)
         } else if (navigateTo.equals("KEEP_NOTES", ignoreCase = true) || navigateTo.equals("NOTES", ignoreCase = true)) {
             viewModel.navigateTo(Screen.KEEP_NOTES)
         } else if (navigateTo.equals("TASKS", ignoreCase = true) || intent.getBooleanExtra("SHOW_TASKS_PAGE", false)) {
@@ -2133,8 +2275,15 @@ class MainActivity : ComponentActivity() {
         val currentIntent = intent
         val hasExplicitNotificationExtra = currentIntent?.hasExtra("NAVIGATE_TO") == true ||
                 currentIntent?.hasExtra("navigate_to") == true ||
+                currentIntent?.action == "com.example.action.OPEN_TIMER_TAB" ||
+                currentIntent?.action == "com.example.action.OPEN_JOURNAL_TAB" ||
+                currentIntent?.action == "com.example.action.OPEN_TASKS_TAB" ||
                 currentIntent?.hasExtra("OPEN_INSTAGRAM_WEB_APP") == true ||
                 currentIntent?.hasExtra("OPEN_YOUTUBE_WEB_APP") == true ||
+                currentIntent?.hasExtra("OPEN_SPOTIFY_WEB_APP") == true ||
+                currentIntent?.action == "com.example.action.OPEN_INSTAGRAM_WEB" ||
+                currentIntent?.action == "com.example.action.OPEN_YOUTUBE_WEB" ||
+                currentIntent?.action == "com.example.action.OPEN_SPOTIFY_WEB" ||
                 currentIntent?.hasExtra("SHOW_TIMER_PAGE") == true ||
                 currentIntent?.hasExtra("SHOW_FULL_SCREEN_TIMER") == true ||
                 currentIntent?.hasExtra("SHOW_TASKS_PAGE") == true ||

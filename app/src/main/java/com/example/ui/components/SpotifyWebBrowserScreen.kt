@@ -872,6 +872,9 @@ fun SpotifyWebBrowserScreen(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
                             )
+                            val cookieManager = android.webkit.CookieManager.getInstance()
+                            cookieManager.setAcceptCookie(true)
+                            cookieManager.setAcceptThirdPartyCookies(this, true)
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
@@ -879,7 +882,11 @@ fun SpotifyWebBrowserScreen(
                                 mediaPlaybackRequiresUserGesture = false
                                 useWideViewPort = true
                                 loadWithOverviewMode = true
-                                userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                                allowFileAccess = true
+                                allowContentAccess = true
+                                javaScriptCanOpenWindowsAutomatically = true
+                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
                                 setRenderPriority(WebSettings.RenderPriority.HIGH)
                                 cacheMode = WebSettings.LOAD_DEFAULT
                             }
@@ -907,50 +914,171 @@ fun SpotifyWebBrowserScreen(
                                 private fun injectWindowsSpoofAndAntiPremium(view: WebView?) {
                                     val script = """
                                     (function() {
-                                        // 1. Windows Browser Device Spoofing
+                                        // 1. Windows Browser Device & Modern Chrome 134 Engine Spoofing
                                         try {
-                                            if (!window.__winDeviceSpoofed) {
-                                                window.__winDeviceSpoofed = true;
-                                                Object.defineProperty(navigator, 'platform', { get: function() { return 'Win32'; }, configurable: true });
-                                                Object.defineProperty(navigator, 'vendor', { get: function() { return 'Google Inc.'; }, configurable: true });
-                                                Object.defineProperty(navigator, 'maxTouchPoints', { get: function() { return 0; }, configurable: true });
-                                                Object.defineProperty(navigator, 'userAgent', { get: function() { return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'; }, configurable: true });
-                                                Object.defineProperty(navigator, 'appVersion', { get: function() { return '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'; }, configurable: true });
-                                                if (navigator.userAgentData) {
-                                                    Object.defineProperty(navigator, 'userAgentData', {
-                                                        get: function() {
-                                                            return {
-                                                                brands: [
-                                                                    { brand: 'Chromium', version: '128' },
-                                                                    { brand: 'Google Chrome', version: '128' }
-                                                                ],
+                                            var modernUa = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
+                                            var modernAppVersion = '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
+
+                                            Object.defineProperty(navigator, 'platform', { get: function() { return 'Win32'; }, configurable: true });
+                                            Object.defineProperty(navigator, 'vendor', { get: function() { return 'Google Inc.'; }, configurable: true });
+                                            Object.defineProperty(navigator, 'maxTouchPoints', { get: function() { return 0; }, configurable: true });
+                                            Object.defineProperty(navigator, 'userAgent', { get: function() { return modernUa; }, configurable: true });
+                                            Object.defineProperty(navigator, 'appVersion', { get: function() { return modernAppVersion; }, configurable: true });
+
+                                            var brandList = [
+                                                { brand: 'Chromium', version: '134' },
+                                                { brand: 'Google Chrome', version: '134' },
+                                                { brand: 'Not:A-Brand', version: '24' }
+                                            ];
+
+                                            var fullVersionList = [
+                                                { brand: 'Chromium', version: '134.0.6998.35' },
+                                                { brand: 'Google Chrome', version: '134.0.6998.35' },
+                                                { brand: 'Not:A-Brand', version: '24.0.0.0' }
+                                            ];
+
+                                            Object.defineProperty(navigator, 'userAgentData', {
+                                                get: function() {
+                                                    return {
+                                                        brands: brandList,
+                                                        mobile: false,
+                                                        platform: 'Windows',
+                                                        getHighEntropyValues: function(hints) {
+                                                            return Promise.resolve({
+                                                                architecture: 'x86',
+                                                                bitness: '64',
+                                                                brands: brandList,
+                                                                fullVersionList: fullVersionList,
                                                                 mobile: false,
+                                                                model: '',
                                                                 platform: 'Windows',
-                                                                getHighEntropyValues: function() {
-                                                                    return Promise.resolve({
-                                                                        architecture: 'x86',
-                                                                        bitness: '64',
-                                                                        model: '',
-                                                                        platform: 'Windows',
-                                                                        platformVersion: '15.0.0',
-                                                                        uaFullVersion: '128.0.0.0'
-                                                                    });
-                                                                }
-                                                            };
-                                                        },
-                                                        configurable: true
+                                                                platformVersion: '15.0.0',
+                                                                uaFullVersion: '134.0.6998.35'
+                                                            });
+                                                        }
+                                                    };
+                                                },
+                                                configurable: true
+                                            });
+
+                                            // Media capabilities & codecs polyfills for audio playback
+                                            if (navigator.mediaCapabilities) {
+                                                navigator.mediaCapabilities.decodingInfo = function(config) {
+                                                    return Promise.resolve({
+                                                        supported: true,
+                                                        smooth: true,
+                                                        powerEfficient: true,
+                                                        keySystemAccess: null
                                                     });
-                                                }
+                                                };
+                                            }
+
+                                            if (window.MediaSource && MediaSource.isTypeSupported) {
+                                                var origIsType = MediaSource.isTypeSupported;
+                                                MediaSource.isTypeSupported = function(t) {
+                                                    if (t && (t.includes('audio') || t.includes('webm') || t.includes('mp4') || t.includes('aac') || t.includes('opus') || t.includes('ogg'))) {
+                                                        return true;
+                                                    }
+                                                    return origIsType ? origIsType.call(MediaSource, t) : true;
+                                                };
+                                            }
+
+                                            if (window.HTMLMediaElement && HTMLMediaElement.prototype.canPlayType) {
+                                                var origCanPlay = HTMLMediaElement.prototype.canPlayType;
+                                                HTMLMediaElement.prototype.canPlayType = function(t) {
+                                                    if (t && (t.includes('audio') || t.includes('mp4') || t.includes('webm') || t.includes('ogg') || t.includes('mpeg') || t.includes('aac') || t.includes('opus'))) {
+                                                        return 'probably';
+                                                    }
+                                                    return origCanPlay ? origCanPlay.call(this, t) : 'maybe';
+                                                };
                                             }
                                         } catch(e) {}
 
-                                        // 2. Anti-Premium & Ad Removal: Inject CSS Rules & Hide Banners/Tabs
-                                        function removeAdsAndPremium() {
+                                        // 2. Anti-Premium, Anti-App-Download & Outdated Browser Removal
+                                        function removeAdsAndOutdatedBanners() {
                                             try {
                                                 if (!document.getElementById('anti-premium-style')) {
                                                     var style = document.createElement('style');
                                                     style.id = 'anti-premium-style';
                                                     style.innerHTML = `
+                                                        /* App & Application Download Removal */
+                                                        a[href*="/download"],
+                                                        a[href*="spotify.com/download"],
+                                                        a[href*="open.spotify.com/download"],
+                                                        a[href*="play.google.com/store/apps/details?id=com.spotify"],
+                                                        a[href*="apps.apple.com"],
+                                                        a[href*="itunes.apple.com"],
+                                                        a[href*="spotify.link"],
+                                                        a[href*="download.spotify.com"],
+                                                        [data-testid="install-app-button"],
+                                                        [data-testid="download-app-button"],
+                                                        [data-testid="top-bar-install-button"],
+                                                        [data-testid="top-bar-download-button"],
+                                                        [data-testid="navigation-item-download"],
+                                                        [data-testid="navigation-item-install"],
+                                                        [data-testid="navigation-item-download-app"],
+                                                        [data-testid="navigation-item-install-app"],
+                                                        [data-testid="nav-item-download"],
+                                                        [data-testid="nav-item-install"],
+                                                        [data-testid="smart-banner"],
+                                                        [data-testid="app-banner"],
+                                                        [data-testid="download-banner"],
+                                                        [data-testid="banner-download"],
+                                                        [data-testid="mobile-app-banner"],
+                                                        [data-testid="open-in-app"],
+                                                        [data-testid="open-app-banner"],
+                                                        [data-testid="app-upsell-banner"],
+                                                        [data-testid="native-app-prompt"],
+                                                        [data-testid="download-desktop-app-button"],
+                                                        [data-testid="install-desktop-app-button"],
+                                                        [data-testid="get-app-button"],
+                                                        [data-testid="open-app-button"],
+                                                        [data-testid="install-app-modal"],
+                                                        [data-testid="download-app-modal"],
+                                                        [data-testid="get-app-modal"],
+                                                        [data-testid="app-modal"],
+                                                        [data-testid="modal-install-app"],
+                                                        [data-testid="modal-download-app"],
+                                                        [data-testid="dialog-install-app"],
+                                                        [data-testid="dialog-download-app"],
+                                                        [data-testid="mobile-web-modal"],
+                                                        [data-testid="mobile-banner"],
+                                                        .main-topBar-downloadApp,
+                                                        .main-topBar-InstallApp,
+                                                        .main-topBar-installApp,
+                                                        .main-actionButtons-download,
+                                                        .main-actionButtons-install,
+                                                        .smart-banner,
+                                                        .app-banner,
+                                                        .download-banner,
+                                                        [aria-label*="Install App" i],
+                                                        [aria-label*="Download App" i],
+                                                        [aria-label*="Install Spotify" i],
+                                                        [aria-label*="Download Spotify" i],
+                                                        [aria-label*="Get the app" i],
+                                                        [aria-label*="Get app" i],
+                                                        [aria-label*="Open App" i],
+                                                        [aria-label*="Open in app" i],
+                                                        [aria-label*="Install" i],
+                                                        [aria-label*="Download" i],
+                                                        div[class*="SmartBanner"],
+                                                        div[class*="smartBanner"],
+                                                        div[class*="DownloadBanner"],
+                                                        div[class*="downloadBanner"],
+                                                        div[class*="AppBanner"],
+                                                        div[class*="appBanner"],
+                                                        div[class*="InstallBanner"],
+                                                        div[class*="installBanner"],
+                                                        div[class*="GetApp"],
+                                                        div[class*="getApp"],
+                                                        div[class*="OpenInApp"],
+                                                        div[class*="openInApp"],
+                                                        div[class*="InstallApp"],
+                                                        div[class*="installApp"],
+                                                        div[class*="DownloadApp"],
+                                                        div[class*="downloadApp"],
+
+                                                        /* Premium Upgrades & Ads Removal */
                                                         a[href*="/premium"],
                                                         a[href*="/upgrade"],
                                                         [data-testid="premium-upgrade-button"],
@@ -974,7 +1102,15 @@ fun SpotifyWebBrowserScreen(
                                                         section[data-testid="premium-upsell"],
                                                         [data-testid="navigation-item-premium"],
                                                         [data-testid="user-widget-link-upgrade"],
-                                                        div[data-testid="now-playing-bar-ad-banner"] {
+                                                        div[data-testid="now-playing-bar-ad-banner"],
+                                                        [data-testid="unsupported-browser-banner"],
+                                                        [data-testid="unsupported-browser-page"],
+                                                        [data-testid="browser-not-supported"],
+                                                        .browser-not-supported,
+                                                        #unsupported-browser,
+                                                        div[class*="UnsupportedBrowser"],
+                                                        div[class*="unsupportedBrowser"],
+                                                        div[class*="Unsupported"] {
                                                             display: none !important;
                                                             visibility: hidden !important;
                                                             height: 0 !important;
@@ -987,6 +1123,20 @@ fun SpotifyWebBrowserScreen(
                                                 }
 
                                                 var selectors = [
+                                                    /* App download selectors */
+                                                    'a[href*="/download"]', 'a[href*="spotify.com/download"]',
+                                                    'a[href*="open.spotify.com/download"]', 'a[href*="spotify.link"]',
+                                                    'a[href*="play.google.com"]', 'a[href*="apps.apple.com"]',
+                                                    '[data-testid="install-app-button"]', '[data-testid="download-app-button"]',
+                                                    '[data-testid="top-bar-install-button"]', '[data-testid="top-bar-download-button"]',
+                                                    '[data-testid="navigation-item-download"]', '[data-testid="navigation-item-install"]',
+                                                    '[data-testid="smart-banner"]', '[data-testid="app-banner"]',
+                                                    '[data-testid="download-banner"]', '[data-testid="mobile-app-banner"]',
+                                                    '[data-testid="open-in-app"]', '[data-testid="open-app-banner"]',
+                                                    '[data-testid="app-upsell-banner"]', '[data-testid="native-app-prompt"]',
+                                                    '.main-topBar-downloadApp', '.main-topBar-InstallApp', '.main-topBar-installApp',
+                                                    '.smart-banner', '.app-banner', '.download-banner',
+                                                    /* Ads & Premium */
                                                     '.ad-unit', '[data-testid="ad-indicator"]', '[aria-label="Advertisement"]',
                                                     '.top-bar-ad-banner', '.LeaderboardAd', '.spotlight-ad',
                                                     'iframe[src*="doubleclick"]', 'iframe[src*="adservice"]',
@@ -994,29 +1144,58 @@ fun SpotifyWebBrowserScreen(
                                                     '[data-testid="premium-upgrade-button"]', '[data-testid="upgrade-button"]',
                                                     '[data-testid="top-bar-upgrade-button"]', '.main-topBar-upgradeButton',
                                                     '.main-actionButtons-upgrade', '[data-testid="billboard-banner"]',
-                                                    '[data-testid="navigation-item-premium"]'
+                                                    '[data-testid="navigation-item-premium"]',
+                                                    '[data-testid="unsupported-browser-banner"]', '[data-testid="browser-not-supported"]'
                                                 ];
                                                 selectors.forEach(function(s) {
                                                     document.querySelectorAll(s).forEach(function(el) {
                                                         el.style.display = 'none';
+                                                        try { el.remove(); } catch(e) {}
                                                     });
                                                 });
 
-                                                var allElements = document.querySelectorAll('a, button, div, span, li, p');
+                                                var appDownloadPhrases = [
+                                                    'install app', 'download app', 'get app', 'get the app', 'get our app', 'get our free app',
+                                                    'open app', 'open in app', 'open in spotify', 'open spotify app', 'open in spotify app',
+                                                    'open in the spotify app', 'open in the app', 'download spotify', 'download spotify free',
+                                                    'install spotify', 'install our app', 'download our app', 'get desktop app', 'download desktop app',
+                                                    'switch to the app', 'listen in the app', 'listen on the app', 'listen in spotify app',
+                                                    'play on spotify app', 'install our desktop app', 'download the free app', 'get the free app',
+                                                    'install the app', 'download free app', 'get premium', 'take premium', 'upgrade',
+                                                    'upgrade to premium', 'explore premium', 'try premium', 'premium tba', 'enjoy premium',
+                                                    'get 3 months of premium', 'upgrade for'
+                                                ];
+
+                                                var allElements = document.querySelectorAll('a, button, div, span, li, p, section');
                                                 allElements.forEach(function(el) {
-                                                    if (!el || !el.innerText) return;
-                                                    var txt = el.innerText.trim().toLowerCase();
-                                                    if (txt === 'get premium' || txt === 'take premium' || txt === 'upgrade' ||
-                                                        txt === 'upgrade to premium' || txt === 'explore premium' || txt === 'try premium' ||
-                                                        txt === 'premium tba' || txt === 'enjoy premium' || txt.includes('get 3 months of premium') ||
-                                                        txt.includes('upgrade for') || txt === 'premium') {
+                                                    if (!el) return;
+                                                    var txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+                                                    var aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                                                    var titleAttr = (el.getAttribute('title') || '').toLowerCase();
+                                                    var href = (el.getAttribute('href') || '').toLowerCase();
+
+                                                    var isAppDownload = appDownloadPhrases.some(function(phrase) {
+                                                        return txt === phrase || txt.indexOf(phrase) !== -1 || aria.indexOf(phrase) !== -1 || titleAttr.indexOf(phrase) !== -1;
+                                                    }) || href.indexOf('/download') !== -1 || href.indexOf('spotify.link') !== -1 || href.indexOf('play.google.com') !== -1;
+
+                                                    if (isAppDownload) {
+                                                        el.style.display = 'none';
                                                         if (el.tagName === 'A' || el.tagName === 'BUTTON' || el.tagName === 'LI' || el.getAttribute('role') === 'button') {
-                                                            el.style.display = 'none';
+                                                            try { el.remove(); } catch(e) {}
                                                         } else if (el.closest) {
-                                                            var target = el.closest('a') || el.closest('button') || el.closest('li');
-                                                            if (target) target.style.display = 'none';
+                                                            var target = el.closest('a') || el.closest('button') || el.closest('li') || el.closest('[data-testid*="banner"]') || el.closest('[data-testid*="modal"]');
+                                                            if (target) {
+                                                                target.style.display = 'none';
+                                                                try { target.remove(); } catch(e) {}
+                                                            }
                                                         }
                                                     }
+                                                });
+
+                                                // Auto-click any dismiss or continue buttons on prompts
+                                                var dismissButtons = document.querySelectorAll('button[aria-label="Dismiss"], button[data-testid="toast-action-button"], button[data-testid="close-button"]');
+                                                dismissButtons.forEach(function(b) {
+                                                    if (b) b.click();
                                                 });
                                             } catch(e) {}
                                         }
@@ -1025,9 +1204,11 @@ fun SpotifyWebBrowserScreen(
                                         function pollTrackInfo() {
                                             try {
                                                 var titleEl = document.querySelector('[data-testid="now-playing-widget"] [data-testid="context-item-info-title"] a') ||
+                                                              document.querySelector('[data-testid="now-playing-widget"] [data-testid="context-item-info-title"]') ||
                                                               document.querySelector('[data-testid="now-playing-widget"] span') ||
                                                               document.querySelector('.now-playing-bar span');
                                                 var artistEl = document.querySelector('[data-testid="now-playing-widget"] [data-testid="context-item-info-artist"] a') ||
+                                                               document.querySelector('[data-testid="now-playing-widget"] [data-testid="context-item-info-artist"]') ||
                                                                document.querySelector('[data-testid="context-item-info-subtitles"] a');
                                                 var imgEl = document.querySelector('[data-testid="now-playing-widget"] img') ||
                                                             document.querySelector('.cover-art img');
@@ -1046,9 +1227,19 @@ fun SpotifyWebBrowserScreen(
                                             } catch(e) {}
                                         }
 
-                                        removeAdsAndPremium();
-                                        setInterval(removeAdsAndPremium, 1500);
+                                        removeAdsAndOutdatedBanners();
+                                        setInterval(removeAdsAndOutdatedBanners, 800);
                                         setInterval(pollTrackInfo, 1000);
+
+                                        if (!window.__spotifyDownloadPurgeObserver) {
+                                            window.__spotifyDownloadPurgeObserver = new MutationObserver(function() {
+                                                removeAdsAndOutdatedBanners();
+                                            });
+                                            window.__spotifyDownloadPurgeObserver.observe(document.documentElement || document.body, {
+                                                childList: true,
+                                                subtree: true
+                                            });
+                                        }
                                     })();
                                     """.trimIndent()
 
@@ -1067,8 +1258,33 @@ fun SpotifyWebBrowserScreen(
                                     injectWindowsSpoofAndAntiPremium(view)
                                 }
 
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    val urlStr = request?.url?.toString()?.lowercase() ?: ""
+                                    if (urlStr.contains("/download") ||
+                                        urlStr.contains("spotify.com/download") ||
+                                        urlStr.contains("play.google.com") ||
+                                        urlStr.contains("apps.apple.com") ||
+                                        urlStr.contains("itunes.apple.com") ||
+                                        urlStr.contains("spotify.link") ||
+                                        urlStr.startsWith("market://") ||
+                                        urlStr.startsWith("spotify:")
+                                    ) {
+                                        // Intercept & suppress external app store/download redirects
+                                        return true
+                                    }
+                                    return super.shouldOverrideUrlLoading(view, request)
+                                }
+
                                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                                     val reqUrl = request?.url?.toString() ?: ""
+                                    val lowerUrl = reqUrl.lowercase()
+                                    if (lowerUrl.contains("/download") ||
+                                        lowerUrl.contains("spotify.com/download") ||
+                                        lowerUrl.contains("spotify.link") ||
+                                        lowerUrl.contains("play.google.com")
+                                    ) {
+                                        return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream("".toByteArray()))
+                                    }
                                     if (isAdBlockEnabled) {
                                         val adDomains = listOf(
                                             "doubleclick.net", "googlesyndication.com", "google-analytics.com",

@@ -334,5 +334,16 @@ object ShortcutUtils {
 
         return bitmap
     }
+
+    /**
+     * Publishes dynamic launcher shortcuts strictly for Timer, Journal, and Tasks.
+     */
+    fun publishAllDynamicWebShortcuts(context: Context) {
+        try {
+            AppShortcutHelper.publishDynamicShortcuts(context)
+        } catch (e: Exception) {
+            Log.e("ShortcutUtils", "Error publishing dynamic shortcuts", e)
+        }
+    }
 }
 

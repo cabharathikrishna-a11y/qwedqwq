@@ -209,6 +209,11 @@
                 <data android:scheme="https" />
                 <data android:host="lifeos.app" />
             </intent-filter>
+
+            <!-- Native Android App Shortcuts -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <activity-alias
@@ -652,18 +657,42 @@
                 android:resource="@xml/photo_shower_widget_info" />
         </receiver>
 
-        <receiver
-            android:name=".widget.QuickShortcutsWidgetProvider"
-            android:label="@string/widget_name_quick_shortcuts"
-            android:description="@string/widget_desc_quick_shortcuts"
-            android:exported="false">
+        <!-- Native Android Launcher Shortcut Creators -->
+        <activity
+            android:name=".shortcut.TimerShortcutActivity"
+            android:label="@string/shortcut_timer_long"
+            android:icon="@drawable/ic_shortcut_timer"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="true">
             <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.CREATE_SHORTCUT" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/quick_shortcuts_widget_info" />
-        </receiver>
+        </activity>
+
+        <activity
+            android:name=".shortcut.JournalShortcutActivity"
+            android:label="@string/shortcut_journal_long"
+            android:icon="@drawable/ic_shortcut_journal"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_SHORTCUT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".shortcut.TasksShortcutActivity"
+            android:label="@string/shortcut_tasks_long"
+            android:icon="@drawable/ic_shortcut_tasks"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_SHORTCUT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
 
         <!-- Receiver for Direct Reply from Notifications -->
         <receiver

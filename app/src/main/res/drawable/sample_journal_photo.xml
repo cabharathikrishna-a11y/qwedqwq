@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="360dp"
+    android:height="240dp"
+    android:viewportWidth="360"
+    android:viewportHeight="240">
+
+    <!-- Sky Background with Warm Sunset Gradient -->
+    <path
+        android:pathData="M0,0h360v240h-360z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="180"
+                android:startY="0"
+                android:endX="180"
+                android:endY="240"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF311042" />
+                <item android:offset="0.25" android:color="#FF6C224E" />
+                <item android:offset="0.5" android:color="#FFE85D04" />
+                <item android:offset="0.7" android:color="#FFF48C06" />
+                <item android:offset="1.0" android:color="#FFFFBA08" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Glowing Golden Sun -->
+    <path
+        android:fillColor="#FFFFEE88"
+        android:pathData="M180,120m-32,0a32,32 0 1,1 64,0a32,32 0 1,1 -64,0" />
+
+    <!-- Distant Mountains Layer 1 -->
+    <path
+        android:fillColor="#8044143D"
+        android:pathData="M-20,170L50,115L120,165L190,105L270,160L330,125L380,170L380,240L-20,240Z" />
+
+    <!-- Midground Mountains Layer 2 -->
+    <path
+        android:fillColor="#D02B0938"
+        android:pathData="M-10,185L70,135L150,180L230,125L300,175L370,140L370,240L-10,240Z" />
+
+    <!-- Calm Lake Water Base -->
+    <path
+        android:pathData="M0,175h360v65h-360z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="180"
+                android:startY="175"
+                android:endX="180"
+                android:endY="240"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF431238" />
+                <item android:offset="0.4" android:color="#FF8A2536" />
+                <item android:offset="1.0" android:color="#FF1A051D" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Sun Reflection in Water -->
+    <path
+        android:fillColor="#80FFBA08"
+        android:pathData="M150,180L210,180L200,195L160,195ZM155,200L205,200L195,212L165,212ZM160,216L200,216L190,225L170,225Z" />
+
+    <!-- Foreground Hills / Shoreline -->
+    <path
+        android:fillColor="#FF140417"
+        android:pathData="M-10,215Q60,195 130,220T280,215T370,210L370,240L-10,240Z" />
+
+    <!-- Silhouette Pine Trees on Left -->
+    <path
+        android:fillColor="#FF0D020F"
+        android:pathData="M25,170L30,185L20,185L32,198L17,198L35,215L15,215L35,230L25,230L25,238L28,238L28,230L45,230L25,215L43,215L28,198L40,198L28,185L38,185Z" />
+    <path
+        android:fillColor="#FF0D020F"
+        android:pathData="M55,180L59,192L50,192L61,203L48,203L63,218L46,218L64,232L54,232L54,238L57,238L57,232L72,232L57,218L70,218L58,203L67,203L58,192L65,192Z" />
+
+    <!-- Distant Birds in Sunset Sky -->
+    <path
+        android:fillColor="#FF2E0827"
+        android:pathData="M110,60Q116,53 122,60Q128,53 134,60Q128,57 122,63Q116,57 110,60Z" />
+    <path
+        android:fillColor="#FF2E0827"
+        android:pathData="M135,72Q140,66 145,72Q150,66 155,72Q150,69 145,74Q140,69 135,72Z" />
+    <path
+        android:fillColor="#FF2E0827"
+        android:pathData="M95,78Q99,73 103,78Q107,73 111,78Q107,75 103,80Q99,75 95,78Z" />
+</vector>

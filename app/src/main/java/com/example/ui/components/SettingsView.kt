@@ -10889,18 +10889,49 @@ fun SettingsTimerConfigurationPage(
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(vertical = 6.dp, horizontal = 2.dp)
                         ) {
-                            Text("Photo Shower", color = Color(0xFF10B981), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("Photos", color = Color(0xFF10B981), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Tab Shortcuts (Pin to Home Screen)", color = Color.Gray, fontSize = 10.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Button(
                             onClick = {
-                                com.example.widget.WidgetManager.requestPinWidget(context, com.example.widget.QuickShortcutsWidgetProvider::class.java)
+                                com.example.util.AppShortcutHelper.pinTimerShortcut(context)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1E1F)),
                             shape = RoundedCornerShape(6.dp),
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(vertical = 6.dp, horizontal = 2.dp)
                         ) {
-                            Text("Shortcuts", color = Color(0xFFF59E0B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("Timer", color = Color(0xFFEF4444), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = {
+                                com.example.util.AppShortcutHelper.pinJournalShortcut(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1E1F)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 6.dp, horizontal = 2.dp)
+                        ) {
+                            Text("Journal", color = Color(0xFFF59E0B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = {
+                                com.example.util.AppShortcutHelper.pinTasksShortcut(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1E1F)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 6.dp, horizontal = 2.dp)
+                        ) {
+                            Text("Tasks", color = Color(0xFF3B82F6), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

@@ -535,6 +535,9 @@ object PersistentWebMediaManager {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
+            val cookieManager = android.webkit.CookieManager.getInstance()
+            cookieManager.setAcceptCookie(true)
+            cookieManager.setAcceptThirdPartyCookies(this, true)
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -542,8 +545,11 @@ object PersistentWebMediaManager {
                 mediaPlaybackRequiresUserGesture = false
                 useWideViewPort = true
                 loadWithOverviewMode = true
+                allowFileAccess = true
+                allowContentAccess = true
+                javaScriptCanOpenWindowsAutomatically = true
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
                 setRenderPriority(WebSettings.RenderPriority.HIGH)
                 cacheMode = WebSettings.LOAD_DEFAULT
             }
@@ -581,8 +587,27 @@ object PersistentWebMediaManager {
                     injectSpotifyHelperJs(view)
                 }
 
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    val urlStr = request?.url?.toString()?.lowercase() ?: ""
+                    if (urlStr.contains("/download") ||
+                        urlStr.contains("spotify.com/download") ||
+                        urlStr.contains("play.google.com") ||
+                        urlStr.contains("apps.apple.com") ||
+                        urlStr.contains("itunes.apple.com") ||
+                        urlStr.contains("spotify.link") ||
+                        urlStr.startsWith("market://") ||
+                        urlStr.startsWith("spotify:")
+                    ) {
+                        return true
+                    }
+                    return super.shouldOverrideUrlLoading(view, request)
+                }
+
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val reqUrl = request?.url?.toString()?.lowercase() ?: ""
+                    if (reqUrl.contains("/download") || reqUrl.contains("spotify.com/download") || reqUrl.contains("spotify.link")) {
+                        return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+                    }
                     if (reqUrl.contains("audio-fa.scdn.co") || reqUrl.contains("audio-ak.spotify.com") || reqUrl.contains("audio4-ak.spotify.com")) {
                         return super.shouldInterceptRequest(view, request)
                     }
@@ -606,6 +631,156 @@ object PersistentWebMediaManager {
             try {
                 Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
                 Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
+            } catch(e) {}
+
+            try {
+                var modernUa = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
+                var modernAppVersion = '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
+
+                Object.defineProperty(navigator, 'platform', { get: function() { return 'Win32'; }, configurable: true });
+                Object.defineProperty(navigator, 'vendor', { get: function() { return 'Google Inc.'; }, configurable: true });
+                Object.defineProperty(navigator, 'maxTouchPoints', { get: function() { return 0; }, configurable: true });
+                Object.defineProperty(navigator, 'userAgent', { get: function() { return modernUa; }, configurable: true });
+                Object.defineProperty(navigator, 'appVersion', { get: function() { return modernAppVersion; }, configurable: true });
+
+                var brandList = [
+                    { brand: 'Chromium', version: '134' },
+                    { brand: 'Google Chrome', version: '134' },
+                    { brand: 'Not:A-Brand', version: '24' }
+                ];
+
+                var fullVersionList = [
+                    { brand: 'Chromium', version: '134.0.6998.35' },
+                    { brand: 'Google Chrome', version: '134.0.6998.35' },
+                    { brand: 'Not:A-Brand', version: '24.0.0.0' }
+                ];
+
+                Object.defineProperty(navigator, 'userAgentData', {
+                    get: function() {
+                        return {
+                            brands: brandList,
+                            mobile: false,
+                            platform: 'Windows',
+                            getHighEntropyValues: function(hints) {
+                                return Promise.resolve({
+                                    architecture: 'x86',
+                                    bitness: '64',
+                                    brands: brandList,
+                                    fullVersionList: fullVersionList,
+                                    mobile: false,
+                                    model: '',
+                                    platform: 'Windows',
+                                    platformVersion: '15.0.0',
+                                    uaFullVersion: '134.0.6998.35'
+                                });
+                            }
+                        };
+                    },
+                    configurable: true
+                });
+
+                if (navigator.mediaCapabilities) {
+                    navigator.mediaCapabilities.decodingInfo = function(config) {
+                        return Promise.resolve({
+                            supported: true,
+                            smooth: true,
+                            powerEfficient: true,
+                            keySystemAccess: null
+                        });
+                    };
+                }
+
+                if (window.MediaSource && MediaSource.isTypeSupported) {
+                    var origIsType = MediaSource.isTypeSupported;
+                    MediaSource.isTypeSupported = function(t) {
+                        if (t && (t.includes('audio') || t.includes('webm') || t.includes('mp4') || t.includes('aac') || t.includes('opus') || t.includes('ogg'))) {
+                            return true;
+                        }
+                        return origIsType ? origIsType.call(MediaSource, t) : true;
+                    };
+                }
+
+                if (window.HTMLMediaElement && HTMLMediaElement.prototype.canPlayType) {
+                    var origCanPlay = HTMLMediaElement.prototype.canPlayType;
+                    HTMLMediaElement.prototype.canPlayType = function(t) {
+                        if (t && (t.includes('audio') || t.includes('mp4') || t.includes('webm') || t.includes('ogg') || t.includes('mpeg') || t.includes('aac') || t.includes('opus'))) {
+                            return 'probably';
+                        }
+                        return origCanPlay ? origCanPlay.call(this, t) : 'maybe';
+                    };
+                }
+            } catch(e) {}
+
+            // Anti-Outdated Browser / App Download / Warning banner injection
+            try {
+                if (!document.getElementById('anti-outdated-spotify-style')) {
+                    var st = document.createElement('style');
+                    st.id = 'anti-outdated-spotify-style';
+                    st.innerHTML = `
+                        a[href*="/download"],
+                        a[href*="spotify.com/download"],
+                        a[href*="open.spotify.com/download"],
+                        a[href*="play.google.com/store/apps/details?id=com.spotify"],
+                        a[href*="apps.apple.com"],
+                        a[href*="itunes.apple.com"],
+                        a[href*="spotify.link"],
+                        a[href*="download.spotify.com"],
+                        [data-testid="install-app-button"],
+                        [data-testid="download-app-button"],
+                        [data-testid="top-bar-install-button"],
+                        [data-testid="top-bar-download-button"],
+                        [data-testid="navigation-item-download"],
+                        [data-testid="navigation-item-install"],
+                        [data-testid="smart-banner"],
+                        [data-testid="app-banner"],
+                        [data-testid="download-banner"],
+                        [data-testid="mobile-app-banner"],
+                        [data-testid="open-in-app"],
+                        [data-testid="open-app-banner"],
+                        [data-testid="app-upsell-banner"],
+                        [data-testid="native-app-prompt"],
+                        .main-topBar-downloadApp,
+                        .main-topBar-InstallApp,
+                        .main-topBar-installApp,
+                        .smart-banner,
+                        .app-banner,
+                        .download-banner,
+                        [aria-label*="Install App" i],
+                        [aria-label*="Download App" i],
+                        [aria-label*="Install Spotify" i],
+                        [aria-label*="Download Spotify" i],
+                        [aria-label*="Get the app" i],
+                        [aria-label*="Get app" i],
+                        [aria-label*="Open App" i],
+                        [aria-label*="Open in app" i],
+                        [aria-label*="Install" i],
+                        [aria-label*="Download" i],
+                        div[class*="SmartBanner"],
+                        div[class*="smartBanner"],
+                        div[class*="DownloadBanner"],
+                        div[class*="downloadBanner"],
+                        div[class*="AppBanner"],
+                        div[class*="appBanner"],
+                        div[class*="InstallBanner"],
+                        div[class*="installBanner"],
+                        [data-testid="unsupported-browser-banner"],
+                        [data-testid="unsupported-browser-page"],
+                        [data-testid="browser-not-supported"],
+                        .browser-not-supported,
+                        #unsupported-browser,
+                        div[class*="UnsupportedBrowser"],
+                        div[class*="unsupportedBrowser"],
+                        div[class*="Unsupported"] {
+                            display: none !important;
+                            visibility: hidden !important;
+                            height: 0 !important;
+                            width: 0 !important;
+                            opacity: 0 !important;
+                            pointer-events: none !important;
+                        }
+                    `;
+                    (document.head || document.documentElement).appendChild(st);
+                }
             } catch(e) {}
 
             ['visibilitychange', 'webkitvisibilitychange', 'blur', 'pagehide'].forEach(function(evt) {

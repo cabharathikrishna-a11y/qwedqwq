@@ -270,7 +270,7 @@ object WidgetManager {
                 updatePomodoroWidget(context)
                 updateTotalFocusTimeWidget(context)
                 updatePhotoShowerWidget(context)
-                updateQuickShortcutsWidget(context)
+                com.example.util.AppShortcutHelper.publishDynamicShortcuts(context)
             } catch (e: Exception) {
                 Log.e(TAG, "Error updating all widgets: ${e.message}", e)
             }
@@ -724,16 +724,18 @@ object WidgetManager {
                         setViewVisibility(R.id.photo_shower_error_layout, View.GONE)
 
                         if (photoItems.isEmpty()) {
-                            // Explicit "No photos in journal" state
-                            setViewVisibility(R.id.photo_shower_image, View.GONE)
-                            setViewVisibility(R.id.photo_bottom_shadow, View.GONE)
-                            setViewVisibility(R.id.photo_date_container, View.GONE)
-                            setViewVisibility(R.id.photo_shower_caption_layout, View.GONE)
+                            // Display sample/dummy photo, date, and caption so user sees exactly how widget displays before adding
+                            setViewVisibility(R.id.photo_shower_empty_layout, View.GONE)
+                            setViewVisibility(R.id.photo_shower_image, View.VISIBLE)
+                            setViewVisibility(R.id.photo_bottom_shadow, View.VISIBLE)
+                            setViewVisibility(R.id.photo_date_container, View.VISIBLE)
+                            setViewVisibility(R.id.photo_shower_caption_layout, View.VISIBLE)
                             setViewVisibility(R.id.btn_next_photo, View.GONE)
-                            setViewVisibility(R.id.photo_shower_empty_layout, View.VISIBLE)
 
-                            setTextViewText(R.id.photo_shower_empty_title, "No photos in journal")
-                            setTextViewText(R.id.photo_shower_empty_desc, "Add photos to your Journal entries to shower them here! Tap to open journal.")
+                            setImageViewResource(R.id.photo_shower_image, R.drawable.sample_journal_photo)
+                            setTextViewText(R.id.photo_shower_date, "14/08/26")
+                            setTextViewText(R.id.photo_shower_title, "Sunset Memories")
+                            setTextViewText(R.id.photo_shower_text, "Golden hour by the lake with calm breeze and reflections...")
 
                             val openAppIntent = Intent(context, MainActivity::class.java).apply {
                                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -741,7 +743,8 @@ object WidgetManager {
                             }
                             val openAppPending = PendingIntent.getActivity(context, 5002, openAppIntent, getPendingIntentFlags())
                             setOnClickPendingIntent(R.id.photo_shower_root, openAppPending)
-                            setOnClickPendingIntent(R.id.photo_shower_empty_layout, openAppPending)
+                            setOnClickPendingIntent(R.id.photo_shower_image, openAppPending)
+                            setOnClickPendingIntent(R.id.photo_shower_caption_layout, openAppPending)
                         } else {
                             setViewVisibility(R.id.photo_shower_empty_layout, View.GONE)
                             setViewVisibility(R.id.photo_shower_image, View.VISIBLE)
@@ -1333,98 +1336,5 @@ object WidgetManager {
             Log.e(TAG, "Failed to decode journal photo bitmap for path $photoPath: ${e.message}")
         }
         return null
-    }
-
-    /**
-     * Updates the Web Apps & Shortcuts Widget.
-     */
-    fun updateQuickShortcutsWidget(context: Context) {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val appWidgetManager = AppWidgetManager.getInstance(context)
-                val thisWidget = ComponentName(context, QuickShortcutsWidgetProvider::class.java)
-                val allWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget)
-                if (allWidgetIds.isEmpty()) return@launch
-
-                val bgRes = getBackgroundDrawableRes(context)
-
-                // Instagram intent
-                val instagramIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    putExtra("OPEN_INSTAGRAM_WEB_APP", true)
-                    putExtra("NAVIGATE_TO", "INSTAGRAM_WEB_APP")
-                }
-                val instagramPendingIntent = PendingIntent.getActivity(context, 8001, instagramIntent, getPendingIntentFlags())
-
-                // YouTube intent
-                val youtubeIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    putExtra("OPEN_YOUTUBE_WEB_APP", true)
-                    putExtra("NAVIGATE_TO", "YOUTUBE_WEB_APP")
-                }
-                val youtubePendingIntent = PendingIntent.getActivity(context, 8002, youtubeIntent, getPendingIntentFlags())
-
-                // Spotify intent
-                val spotifyIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    putExtra("OPEN_SPOTIFY_WEB_APP", true)
-                    putExtra("NAVIGATE_TO", "SPOTIFY_WEB_APP")
-                }
-                val spotifyPendingIntent = PendingIntent.getActivity(context, 8003, spotifyIntent, getPendingIntentFlags())
-
-                // Keep Notes intent
-                val notesIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    putExtra("NAVIGATE_TO", "KEEP_NOTES")
-                }
-                val notesPendingIntent = PendingIntent.getActivity(context, 8004, notesIntent, getPendingIntentFlags())
-
-                // Tasks intent
-                val tasksIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    putExtra("SHOW_TASKS_PAGE", true)
-                    putExtra("NAVIGATE_TO", "TASKS")
-                }
-                val tasksPendingIntent = PendingIntent.getActivity(context, 8005, tasksIntent, getPendingIntentFlags())
-
-                // Timer intent
-                val timerIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    putExtra("SHOW_TIMER_PAGE", true)
-                    putExtra("NAVIGATE_TO", "TIMER")
-                }
-                val timerPendingIntent = PendingIntent.getActivity(context, 8006, timerIntent, getPendingIntentFlags())
-
-                val instagramBmp = com.example.util.ShortcutUtils.createInstagramLogoBitmap()
-                val youtubeBmp = com.example.util.ShortcutUtils.createYouTubeLogoBitmap()
-                val spotifyBmp = com.example.util.ShortcutUtils.createSpotifyLogoBitmap()
-                val notesBmp = com.example.util.ShortcutUtils.createKeepNotesLogoBitmap()
-                val tasksBmp = com.example.util.ShortcutUtils.createTasksLogoBitmap()
-                val timerBmp = com.example.util.ShortcutUtils.createTimerLogoBitmap()
-
-                for (widgetId in allWidgetIds) {
-                    val views = RemoteViews(context.packageName, R.layout.widget_quick_shortcuts).apply {
-                        setInt(android.R.id.background, "setBackgroundResource", bgRes)
-
-                        setImageViewBitmap(R.id.img_shortcut_instagram, instagramBmp)
-                        setImageViewBitmap(R.id.img_shortcut_youtube, youtubeBmp)
-                        setImageViewBitmap(R.id.img_shortcut_spotify, spotifyBmp)
-                        setImageViewBitmap(R.id.img_shortcut_notes, notesBmp)
-                        setImageViewBitmap(R.id.img_shortcut_tasks, tasksBmp)
-                        setImageViewBitmap(R.id.img_shortcut_timer, timerBmp)
-
-                        setOnClickPendingIntent(R.id.btn_shortcut_instagram, instagramPendingIntent)
-                        setOnClickPendingIntent(R.id.btn_shortcut_youtube, youtubePendingIntent)
-                        setOnClickPendingIntent(R.id.btn_shortcut_spotify, spotifyPendingIntent)
-                        setOnClickPendingIntent(R.id.btn_shortcut_notes, notesPendingIntent)
-                        setOnClickPendingIntent(R.id.btn_shortcut_tasks, tasksPendingIntent)
-                        setOnClickPendingIntent(R.id.btn_shortcut_timer, timerPendingIntent)
-                    }
-                    appWidgetManager.updateAppWidget(widgetId, views)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to update quick shortcuts widget", e)
-            }
-        }
     }
 }

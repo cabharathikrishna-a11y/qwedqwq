@@ -77,6 +77,7 @@ fun FileExplorerView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     var activePreviewFile by remember { mutableStateOf<ExplorerFile?>(null) }
     
     var pdfViewerPath by remember { mutableStateOf<String?>(null) }
+    var pdfViewerFileName by remember { mutableStateOf<String?>(null) }
     var pdfViewerIsWebUrl by remember { mutableStateOf(false) }
     
     var officeDocViewerPath by remember { mutableStateOf<String?>(null) }
@@ -2437,6 +2438,7 @@ fun FileExplorerView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                     }
                     activePreviewFile = null
                 } else if (fileNode.fileMime == "application/pdf-link") {
+                    pdfViewerFileName = fileNode.name
                     pdfViewerPath = fileNode.path
                     pdfViewerIsWebUrl = fileNode.path.startsWith("http://") || fileNode.path.startsWith("https://")
                     activePreviewFile = null
@@ -2460,6 +2462,7 @@ fun FileExplorerView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                 }
                 
                 if (isPdf) {
+                    pdfViewerFileName = fileNode.name
                     val localFile = java.io.File(fileNode.path)
                     if (localFile.exists() && localFile.length() > 0) {
                         pdfViewerPath = localFile.absolutePath
@@ -4303,8 +4306,12 @@ fun FileExplorerView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
         if (pdfViewerPath != null) {
             com.example.util.InAppPdfViewerDialog(
                 cleanPath = pdfViewerPath!!,
+                initialFileName = pdfViewerFileName,
                 isWebUrl = pdfViewerIsWebUrl,
-                onDismiss = { pdfViewerPath = null }
+                onDismiss = {
+                    pdfViewerPath = null
+                    pdfViewerFileName = null
+                }
             )
         }
 
@@ -4468,31 +4475,15 @@ fun FileExplorerView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                                     .fillMaxWidth()
                                     .clickable {
                                         activeFileForOptions = null
-                                        scope.launch {
-                                            try {
-                                                android.widget.Toast.makeText(context, "Compressing PDF below 5 MB...", android.widget.Toast.LENGTH_SHORT).show()
-                                                val sourcePath = fileNode.path
-                                                val result = com.example.util.PdfCompressorHelper.compressPdf(
-                                                    context = context,
-                                                    inputSource = sourcePath,
-                                                    targetMaxSizeBytes = 5 * 1024 * 1024L
-                                                )
-                                                viewModel.addFile(
-                                                    name = result.outputFile.name,
-                                                    path = "",
-                                                    size = result.compressedSizeBytes,
-                                                    mimeType = "application/pdf",
-                                                    uriString = result.outputFile.absolutePath
-                                                )
-                                                val sizeMb = String.format(java.util.Locale.US, "%.2f MB", result.compressedSizeBytes / (1024.0 * 1024.0))
-                                                android.widget.Toast.makeText(context, "PDF Compressed (${result.reductionPercentage}% smaller, $sizeMb)!", android.widget.Toast.LENGTH_LONG).show()
-                                                
-                                                // Open view of compressed copy
-                                                pdfViewerPath = result.outputFile.absolutePath
-                                            } catch (e: Exception) {
-                                                android.widget.Toast.makeText(context, "Compression failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                                            }
-                                        }
+                                        val sourcePath = fileNode.appFileRef?.uriString?.ifEmpty { fileNode.path } ?: fileNode.path
+                                        android.widget.Toast.makeText(context, "Compressing \"${fileNode.name}\" in background (Target < 5 MB)... Will open once completed!", android.widget.Toast.LENGTH_LONG).show()
+                                        com.example.util.PdfCompressorHelper.startBackgroundCompression(
+                                            context = context,
+                                            inputSource = sourcePath,
+                                            customOutputFileName = fileNode.name,
+                                            targetMaxSizeBytes = 5 * 1024 * 1024L,
+                                            autoOpenOnComplete = true
+                                        )
                                     }
                                     .padding(vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically

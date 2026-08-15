@@ -360,7 +360,7 @@ fun PdfListCard(
                             val targetPath = item.filePath ?: item.uriString
                             val fileToShare = java.io.File(targetPath)
                             if (fileToShare.exists()) {
-                                com.example.util.sharePdfFile(context, fileToShare, "Share PDF")
+                                com.example.util.sharePdfFile(context, fileToShare, "Share PDF", preferredFileName = item.title)
                             } else {
                                 android.widget.Toast.makeText(context, "File unavailable for sharing", android.widget.Toast.LENGTH_SHORT).show()
                             }

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="shortcut_timer"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_timer"
+        android:shortcutShortLabel="@string/shortcut_timer_short"
+        android:shortcutLongLabel="@string/shortcut_timer_long">
+        <intent
+            android:action="com.example.action.OPEN_TIMER_TAB"
+            android:targetPackage="com.example"
+            android:targetClass="com.example.MainActivity">
+            <extra android:name="NAVIGATE_TO" android:value="TIMER" />
+            <extra android:name="SHOW_TIMER_PAGE" android:value="true" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="shortcut_journal"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_journal"
+        android:shortcutShortLabel="@string/shortcut_journal_short"
+        android:shortcutLongLabel="@string/shortcut_journal_long">
+        <intent
+            android:action="com.example.action.OPEN_JOURNAL_TAB"
+            android:targetPackage="com.example"
+            android:targetClass="com.example.MainActivity">
+            <extra android:name="NAVIGATE_TO" android:value="JOURNAL" />
+            <extra android:name="SHOW_JOURNAL_PAGE" android:value="true" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="shortcut_tasks"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_tasks"
+        android:shortcutShortLabel="@string/shortcut_tasks_short"
+        android:shortcutLongLabel="@string/shortcut_tasks_long">
+        <intent
+            android:action="com.example.action.OPEN_TASKS_TAB"
+            android:targetPackage="com.example"
+            android:targetClass="com.example.MainActivity">
+            <extra android:name="NAVIGATE_TO" android:value="TASKS" />
+            <extra android:name="SHOW_TASKS_PAGE" android:value="true" />
+        </intent>
+    </shortcut>
+</shortcuts>

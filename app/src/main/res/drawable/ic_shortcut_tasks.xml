@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Existing Blue Background Circle -->
+    <path
+        android:fillColor="#3B82F6"
+        android:pathData="M12,1C5.92,1 1,5.92 1,12C1,18.08 5.92,23 12,23C18.08,23 23,18.08 23,12C23,5.92 18.08,1 12,1Z" />
+    <!-- Bold Solid Tick Mark / Checkmark -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M9.8,17.2L5.2,12.6L6.9,10.9L9.8,13.8L17.1,6.5L18.8,8.2L9.8,17.2Z" />
+</vector>
+

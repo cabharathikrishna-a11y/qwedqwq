@@ -12,6 +12,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:scaleType="centerCrop"
+        android:src="@drawable/sample_journal_photo"
         android:contentDescription="Journal Photo" />
 
     <!-- Dark gradient shadow overlay at bottom for maximum title readability -->
@@ -41,7 +42,7 @@
             android:id="@+id/photo_shower_date"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="10/08/26"
+            android:text="14/08/26"
             android:textColor="#FFFFFF"
             android:textSize="11sp"
             android:textStyle="bold"
@@ -79,7 +80,7 @@
             android:id="@+id/photo_shower_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Journal Title"
+            android:text="Sunset Memories"
             android:textColor="#FFFFFF"
             android:textSize="13sp"
             android:textStyle="bold"
@@ -91,7 +92,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:text="Journal note preview..."
+            android:text="Golden hour by the lake with calm breeze and reflections..."
             android:textColor="#E0E0E0"
             android:textSize="11sp"
             android:maxLines="2"

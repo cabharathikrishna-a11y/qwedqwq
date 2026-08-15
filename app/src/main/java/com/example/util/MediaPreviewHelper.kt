@@ -270,29 +270,61 @@ fun openFileInGoogleDrivePdfViewer(context: android.content.Context, file: File)
     openPdfInSystemApp(context, file)
 }
 
-fun sharePdfFile(context: android.content.Context, file: File, title: String = "Share PDF") {
+fun sharePdfFile(
+    context: android.content.Context,
+    file: File,
+    title: String = "Share PDF",
+    preferredFileName: String? = null
+) {
     if (!file.exists()) {
         android.widget.Toast.makeText(context, "File does not exist", android.widget.Toast.LENGTH_SHORT).show()
         return
     }
     try {
+        var fileToShare = file
+        val rawBase = if (!preferredFileName.isNullOrBlank()) preferredFileName else file.name
+        val cleanBase = PdfCompressorHelper.sanitizeBaseFileName(rawBase)
+        val targetName = if (cleanBase.isNotBlank() && !PdfCompressorHelper.isGeneratedTempName(cleanBase)) {
+            "${cleanBase}.pdf"
+        } else {
+            file.name
+        }
+
+        // If current file has a temp/cache name or differs from target display name,
+        // copy to a named file in shared_pdfs cache folder so recipient apps see the exact clean name
+        if (fileToShare.name != targetName) {
+            val sharedDir = File(context.cacheDir, "shared_pdfs")
+            if (!sharedDir.exists()) sharedDir.mkdirs()
+            val namedFile = File(sharedDir, targetName)
+            try {
+                file.copyTo(namedFile, overwrite = true)
+                if (namedFile.exists() && namedFile.length() > 0) {
+                    fileToShare = namedFile
+                }
+            } catch (e: Exception) {
+                // Fall back to original file if copy fails
+            }
+        }
+
         val uri = try {
             androidx.core.content.FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.fileprovider",
-                file
+                fileToShare
             )
         } catch (e: Exception) {
             androidx.core.content.FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.provider",
-                file
+                fileToShare
             )
         }
 
         val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
             type = "application/pdf"
             putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, targetName)
+            putExtra(android.content.Intent.EXTRA_TEXT, "Sharing $targetName")
             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         val chooser = android.content.Intent.createChooser(shareIntent, title).apply {
@@ -2387,6 +2419,7 @@ object MediaCompressionHelper {
 @Composable
 fun InAppPdfViewerDialog(
     cleanPath: String,
+    initialFileName: String? = null,
     isWebUrl: Boolean = false,
     autoCompress: Boolean = false,
     askCompressOrView: Boolean = false,
@@ -2406,7 +2439,15 @@ fun InAppPdfViewerDialog(
     var compressionPageProgress by remember { mutableStateOf(0 to 0) }
     var compressionDetailStats by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var pdfFileName by remember { mutableStateOf("PDF Document") }
+    var pdfFileName by remember(cleanPath, initialFileName) {
+        mutableStateOf(
+            if (!initialFileName.isNullOrBlank() && initialFileName != "PDF Document" && !PdfCompressorHelper.isGeneratedTempName(initialFileName)) {
+                initialFileName
+            } else {
+                "PDF Document"
+            }
+        )
+    }
     var scale by remember { mutableFloatStateOf(1.0f) }
     var resolvedFile by remember { mutableStateOf<java.io.File?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -2567,49 +2608,54 @@ fun InAppPdfViewerDialog(
     }
 
     // Auto-compress logic if opened via Life OS Compressor target
-    LaunchedEffect(resolvedFile, shouldAutoCompress) {
-        val fileToCompress = resolvedFile
-        if (shouldAutoCompress && fileToCompress != null && fileToCompress.exists() && !isCompressing) {
-            shouldAutoCompress = false
-            isCompressing = true
-            val origMb = String.format(java.util.Locale.US, "%.2f MB", fileToCompress.length() / (1024.0 * 1024.0))
-            compressionDetailStats = "Original: $origMb • Target: < 5.00 MB"
-            try {
-                val result = com.example.util.PdfCompressorHelper.compressPdf(
-                    context = context,
-                    inputSource = fileToCompress,
-                    targetMaxSizeBytes = 5 * 1024 * 1024L,
-                    onProgress = { cur, total, msg ->
-                        compressionPageProgress = cur to total
-                        compressionProgressText = msg
-                    }
-                )
-                val compMb = String.format(java.util.Locale.US, "%.2f MB", result.compressedSizeBytes / (1024.0 * 1024.0))
-                val summaryText = "Compressed: $origMb ➔ $compMb (${result.reductionPercentage}% smaller)"
-                compressionDetailStats = summaryText
-
+    LaunchedEffect(resolvedFile, shouldAutoCompress, currentActivePath) {
+        if (shouldAutoCompress && !isCompressing) {
+            val fileToCompress = resolvedFile ?: if (!isWebUrl && !currentActivePath.startsWith("http")) java.io.File(currentActivePath).takeIf { it.exists() && it.length() > 0 } else null
+            if (fileToCompress != null) {
+                shouldAutoCompress = false
+                isCompressing = true
+                val origMb = String.format(java.util.Locale.US, "%.2f MB", fileToCompress.length() / (1024.0 * 1024.0))
+                compressionDetailStats = "Original: $origMb • Target: < 5.00 MB"
                 try {
-                    val pdfRepo = com.example.pdf.PdfStorageRepository(context)
-                    val item = com.example.pdf.PdfDocumentItem(
-                        id = java.util.UUID.randomUUID().toString(),
-                        title = result.outputFile.name,
-                        uriString = result.outputFile.absolutePath,
-                        fileSizeFormatted = compMb,
-                        pageCount = pageCount
+                    // Release any active file descriptors before starting background compression
+                    try {
+                        pdfRenderer?.close()
+                        parcelDescriptor?.close()
+                    } catch (e: Exception) {
+                        // ignore
+                    }
+                    pdfRenderer = null
+                    parcelDescriptor = null
+
+                    val candidateName = if (pdfFileName != "PDF Document" && !PdfCompressorHelper.isGeneratedTempName(pdfFileName)) pdfFileName else null
+                    com.example.util.PdfCompressorHelper.startBackgroundCompression(
+                        context = context,
+                        inputSource = fileToCompress,
+                        targetMaxSizeBytes = 5 * 1024 * 1024L,
+                        customOutputFileName = candidateName,
+                        autoOpenOnComplete = true,
+                        onCompleted = { result ->
+                            val compMb = String.format(java.util.Locale.US, "%.2f MB", result.compressedSizeBytes / (1024.0 * 1024.0))
+                            val summaryText = "Compressed: $origMb ➔ $compMb (${result.reductionPercentage}% smaller)"
+                            compressionDetailStats = summaryText
+                            android.widget.Toast.makeText(context, summaryText, android.widget.Toast.LENGTH_LONG).show()
+
+                            // Auto open and view the compressed copy with updated clean title!
+                            pdfFileName = result.outputFile.name
+                            currentActivePath = result.outputFile.absolutePath
+                            isCompressing = false
+                        },
+                        onError = { e ->
+                            Log.e("PdfViewer", "PDF compression failed", e)
+                            android.widget.Toast.makeText(context, "Compression failed: ${e.message ?: "Unknown error"}", android.widget.Toast.LENGTH_LONG).show()
+                            isCompressing = false
+                        }
                     )
-                    pdfRepo.addOrUpdatePdf(item)
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e("PdfViewer", "PDF compression failed", e)
+                    android.widget.Toast.makeText(context, "Compression failed: ${e.message ?: "Unknown error"}", android.widget.Toast.LENGTH_LONG).show()
+                    isCompressing = false
                 }
-
-                android.widget.Toast.makeText(context, summaryText, android.widget.Toast.LENGTH_LONG).show()
-
-                // Auto open and view the compressed copy!
-                currentActivePath = result.outputFile.absolutePath
-            } catch (e: Exception) {
-                android.widget.Toast.makeText(context, "Compression failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-            } finally {
-                isCompressing = false
             }
         }
     }
@@ -2772,7 +2818,7 @@ fun InAppPdfViewerDialog(
                                             showMenu = false
                                             val fileToShare = resolvedFile ?: if (!isWebUrl) java.io.File(currentActivePath) else null
                                             if (fileToShare != null && fileToShare.exists()) {
-                                                sharePdfFile(context, fileToShare, "Share PDF")
+                                                sharePdfFile(context, fileToShare, "Share PDF", preferredFileName = if (pdfFileName != "PDF Document" && !PdfCompressorHelper.isGeneratedTempName(pdfFileName)) pdfFileName else fileToShare.name)
                                             } else {
                                                 android.widget.Toast.makeText(context, "File unavailable for sharing", android.widget.Toast.LENGTH_SHORT).show()
                                             }
@@ -2813,39 +2859,41 @@ fun InAppPdfViewerDialog(
                                                     val origMb = String.format(java.util.Locale.US, "%.2f MB", fileToCompress.length() / (1024.0 * 1024.0))
                                                     compressionDetailStats = "Original: $origMb • Target: < 5.00 MB"
                                                     try {
-                                                        val result = com.example.util.PdfCompressorHelper.compressPdf(
+                                                        // Release active renderer descriptors before compression
+                                                        try {
+                                                            pdfRenderer?.close()
+                                                            parcelDescriptor?.close()
+                                                        } catch (e: Exception) {
+                                                            // ignore
+                                                        }
+                                                        pdfRenderer = null
+                                                        parcelDescriptor = null
+
+                                                        val candidateName = if (pdfFileName != "PDF Document" && !PdfCompressorHelper.isGeneratedTempName(pdfFileName)) pdfFileName else null
+                                                        com.example.util.PdfCompressorHelper.startBackgroundCompression(
                                                             context = context,
                                                             inputSource = fileToCompress,
                                                             targetMaxSizeBytes = 5 * 1024 * 1024L,
-                                                            onProgress = { cur, total, msg ->
-                                                                compressionPageProgress = cur to total
-                                                                compressionProgressText = msg
+                                                            customOutputFileName = candidateName,
+                                                            autoOpenOnComplete = true,
+                                                            onCompleted = { result ->
+                                                                val compMb = String.format(java.util.Locale.US, "%.2f MB", result.compressedSizeBytes / (1024.0 * 1024.0))
+                                                                val summaryText = "Compressed: $origMb ➔ $compMb (${result.reductionPercentage}% smaller)"
+                                                                compressionDetailStats = summaryText
+                                                                android.widget.Toast.makeText(context, summaryText, android.widget.Toast.LENGTH_LONG).show()
+                                                                pdfFileName = result.outputFile.name
+                                                                currentActivePath = result.outputFile.absolutePath
+                                                                isCompressing = false
+                                                            },
+                                                            onError = { e ->
+                                                                Log.e("PdfViewer", "PDF compression error", e)
+                                                                android.widget.Toast.makeText(context, "Compression failed: ${e.message ?: "Unknown error"}", android.widget.Toast.LENGTH_LONG).show()
+                                                                isCompressing = false
                                                             }
                                                         )
-                                                        val compMb = String.format(java.util.Locale.US, "%.2f MB", result.compressedSizeBytes / (1024.0 * 1024.0))
-                                                        val summaryText = "Compressed: $origMb ➔ $compMb (${result.reductionPercentage}% smaller)"
-                                                        compressionDetailStats = summaryText
-
-                                                        try {
-                                                            val pdfRepo = com.example.pdf.PdfStorageRepository(context)
-                                                            val item = com.example.pdf.PdfDocumentItem(
-                                                                id = java.util.UUID.randomUUID().toString(),
-                                                                title = result.outputFile.name,
-                                                                uriString = result.outputFile.absolutePath,
-                                                                fileSizeFormatted = compMb,
-                                                                pageCount = pageCount
-                                                            )
-                                                            pdfRepo.addOrUpdatePdf(item)
-                                                        } catch (e: Exception) {
-                                                            e.printStackTrace()
-                                                        }
-                                                        android.widget.Toast.makeText(context, summaryText, android.widget.Toast.LENGTH_LONG).show()
-                                                        
-                                                        // Automatically open the compressed copy view!
-                                                        currentActivePath = result.outputFile.absolutePath
                                                     } catch (e: Exception) {
-                                                        android.widget.Toast.makeText(context, "Compression failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                                                    } finally {
+                                                        Log.e("PdfViewer", "PDF compression error", e)
+                                                        android.widget.Toast.makeText(context, "Compression failed: ${e.message ?: "Unknown error"}", android.widget.Toast.LENGTH_LONG).show()
                                                         isCompressing = false
                                                     }
                                                 }
@@ -2958,6 +3006,20 @@ fun InAppPdfViewerDialog(
                                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                                     )
                                 }
+                            }
+                            Spacer(modifier = Modifier.height(20.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    onDismiss()
+                                    android.widget.Toast.makeText(context, "Compressing in background. Will open automatically once ready!", android.widget.Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Color(0xFF4ADE80)
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4ADE80).copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Work in Background", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     } else if (isLoading) {
