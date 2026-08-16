@@ -1516,16 +1516,7 @@ fun WebOfficeDocumentViewer(
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        allowFileAccess = true
-                        allowContentAccess = true
-                        loadWithOverviewMode = true
-                        useWideViewPort = true
-                        builtInZoomControls = true
-                        displayZoomControls = false
-                    }
+                    com.example.util.WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
                     webViewClient = object : WebViewClient() {
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             isWebLoading = true

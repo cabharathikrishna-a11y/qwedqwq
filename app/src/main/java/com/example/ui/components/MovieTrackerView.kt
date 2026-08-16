@@ -1834,9 +1834,7 @@ fun MovieTrailerEmbeddedPlayer(
                 AndroidView(
                     factory = { ctx ->
                         WebView(ctx).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.mediaPlaybackRequiresUserGesture = false
+                            com.example.util.WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
                             webChromeClient = WebChromeClient()
                             webViewClient = WebViewClient()
                             val embedHtml = """

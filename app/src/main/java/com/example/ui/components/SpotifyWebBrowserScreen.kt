@@ -28,6 +28,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -50,9 +52,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.ui.AppViewModel
 import com.example.util.NetworkChecker
 import com.example.util.ShortcutUtils
+import com.example.util.WebViewTurboHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -83,6 +88,24 @@ data class SpotifyOfflineSong(
     val timestamp: Long
 )
 
+// Modes for Spotify experience
+enum class SpotifyPlayerMode {
+    WEB_BROWSER,
+    EMBED_LITE,
+    SEARCH_STREAM
+}
+
+// Data class for live online streaming track
+data class SpotifyOnlineTrack(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val coverUrl: String,
+    val streamUrl: String,
+    val durationSec: Int
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -94,12 +117,19 @@ fun SpotifyWebBrowserScreen(
     val scope = rememberCoroutineScope()
     val prefs = remember(context) { context.getSharedPreferences("spotify_app_prefs", Context.MODE_PRIVATE) }
 
+    // Player Mode State: Web Full, Embed Lite, or Search & Stream
+    var currentMode by remember { mutableStateOf(SpotifyPlayerMode.WEB_BROWSER) }
+    var onlineSearchQuery by remember { mutableStateOf("") }
+    var isSearchingOnline by remember { mutableStateOf(false) }
+    var onlineSearchResults by remember { mutableStateOf<List<SpotifyOnlineTrack>>(emptyList()) }
+    var activeStreamingTrack by remember { mutableStateOf<SpotifyOnlineTrack?>(null) }
+
     // State Variables
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var isAdBlockEnabled by remember { mutableStateOf(prefs.getBoolean("spotify_adblock_enabled", true)) }
 
-    // Current playing track info extracted from Spotify DOM
+    // Current playing track info extracted from Spotify DOM or Live Streamer
     var currentTrackTitle by remember { mutableStateOf("No track playing") }
     var currentArtistName by remember { mutableStateOf("Spotify Web") }
     var currentCoverArtUrl by remember { mutableStateOf("") }
@@ -500,6 +530,149 @@ fun SpotifyWebBrowserScreen(
         }
     }
 
+    // Direct streaming playback for searched online tracks
+    fun playOnlineStreamTrack(track: SpotifyOnlineTrack) {
+        scope.launch(Dispatchers.Main) {
+            try {
+                offlineMediaPlayer?.stop()
+                offlineMediaPlayer?.release()
+                offlineMediaPlayer = null
+                isOfflinePlaying = false
+
+                currentTrackTitle = track.title
+                currentArtistName = track.artist
+                currentCoverArtUrl = track.coverUrl
+                trackDurationSec = track.durationSec
+                activeStreamingTrack = track
+
+                val mp = MediaPlayer().apply {
+                    setDataSource(track.streamUrl)
+                    setOnPreparedListener { player ->
+                        player.start()
+                        isOfflinePlaying = true
+                        offlineDurationMs = player.duration
+                        Toast.makeText(context, "Playing: ${track.title} 🎵", Toast.LENGTH_SHORT).show()
+                    }
+                    setOnCompletionListener {
+                        isOfflinePlaying = false
+                        offlinePlaybackPosMs = 0
+                    }
+                    setOnErrorListener { _, what, extra ->
+                        Log.e("SpotifyStream", "MediaPlayer error $what $extra")
+                        isOfflinePlaying = false
+                        Toast.makeText(context, "Playback error", Toast.LENGTH_SHORT).show()
+                        true
+                    }
+                    prepareAsync()
+                }
+                offlineMediaPlayer = mp
+            } catch (e: Exception) {
+                Log.e("SpotifyStream", "Error starting stream", e)
+            }
+        }
+    }
+
+    // Search online tracks across Apple Music / iTunes high-speed database
+    fun searchOnlineTracks(query: String) {
+        if (query.isBlank()) return
+        isSearchingOnline = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                val encoded = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+                val url = URL("https://itunes.apple.com/search?term=$encoded&entity=song&limit=30")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 6000
+                conn.readTimeout = 6000
+                val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                val root = JSONObject(jsonStr)
+                val results = root.optJSONArray("results")
+                val list = mutableListOf<SpotifyOnlineTrack>()
+                if (results != null) {
+                    for (i in 0 until results.length()) {
+                        val item = results.getJSONObject(i)
+                        val streamUrl = item.optString("previewUrl")
+                        if (streamUrl.isNotBlank()) {
+                            val trackId = item.optString("trackId", item.optString("collectionId", "t_$i"))
+                            val trackName = item.optString("trackName", "Unknown Song")
+                            val artistName = item.optString("artistName", "Unknown Artist")
+                            val albumName = item.optString("collectionName", "")
+                            val artwork = item.optString("artworkUrl100").replace("100x100bb", "600x600bb")
+                            val durationMs = item.optInt("trackTimeMillis", 30000)
+                            list.add(
+                                SpotifyOnlineTrack(
+                                    id = trackId,
+                                    title = trackName,
+                                    artist = artistName,
+                                    album = albumName,
+                                    coverUrl = artwork,
+                                    streamUrl = streamUrl,
+                                    durationSec = durationMs / 1000
+                                )
+                            )
+                        }
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    onlineSearchResults = list
+                    isSearchingOnline = false
+                }
+            } catch (e: Exception) {
+                Log.e("SpotifySearch", "Search error", e)
+                withContext(Dispatchers.Main) {
+                    isSearchingOnline = false
+                    Toast.makeText(context, "Search failed, check connection", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // Connect & stream audio for detected Spotify track
+    fun streamDetectedWebTrack(title: String, artist: String) {
+        if (title.isBlank() || title == "No track playing") {
+            Toast.makeText(context, "Select a track on Spotify first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(context, "Connecting audio stream for $title...", Toast.LENGTH_SHORT).show()
+        scope.launch(Dispatchers.IO) {
+            try {
+                val query = java.net.URLEncoder.encode("$title $artist", "UTF-8")
+                val url = URL("https://itunes.apple.com/search?term=$query&entity=song&limit=1")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                val root = JSONObject(jsonStr)
+                val results = root.optJSONArray("results")
+                if (results != null && results.length() > 0) {
+                    val item = results.getJSONObject(0)
+                    val streamUrl = item.optString("previewUrl")
+                    val trackName = item.optString("trackName", title)
+                    val artistName = item.optString("artistName", artist)
+                    val artwork = item.optString("artworkUrl100").replace("100x100bb", "600x600bb")
+                    val durationMs = item.optInt("trackTimeMillis", 30000)
+                    val track = SpotifyOnlineTrack(
+                        id = "det_${System.currentTimeMillis()}",
+                        title = trackName,
+                        artist = artistName,
+                        album = item.optString("collectionName", ""),
+                        coverUrl = artwork,
+                        streamUrl = streamUrl,
+                        durationSec = durationMs / 1000
+                    )
+                    withContext(Dispatchers.Main) {
+                        playOnlineStreamTrack(track)
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Audio stream not found for $title. Try Search & Stream tab!", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("SpotifyStream", "Failed to stream detected track", e)
+            }
+        }
+    }
+
     BackHandler {
         if (showOfflineLibraryModal) {
             showOfflineLibraryModal = false
@@ -516,185 +689,242 @@ fun SpotifyWebBrowserScreen(
                 color = Color(0xFF121212),
                 shadowElevation = 8.dp
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .statusBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        IconButton(
-                            onClick = { onBack() },
-                            modifier = Modifier.testTag("spotify_back_btn")
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = Color.White
-                            )
-                        }
-
-                        // Spotify Logo Icon + Title
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF1DB954)),
-                                contentAlignment = Alignment.Center
+                            IconButton(
+                                onClick = { onBack() },
+                                modifier = Modifier.testTag("spotify_back_btn")
                             ) {
                                 Icon(
-                                    Icons.Default.MusicNote,
-                                    contentDescription = "Spotify",
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(18.dp)
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = Color.White
                                 )
                             }
-                            Column {
-                                Text(
-                                    "Spotify Web",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp
+
+                            // Spotify Logo Icon + Title
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF1DB954)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.MusicNote,
+                                        contentDescription = "Spotify",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        "Spotify Music",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                    Text(
+                                        if (currentMode == SpotifyPlayerMode.SEARCH_STREAM) "Instant Stream ⚡" else if (showOfflineViewOnly) "Offline Mode 💾" else if (isAdBlockEnabled) "AdBlock Active 🛡️" else "Online Mode",
+                                        color = if (showOfflineViewOnly) Color(0xFFFF9800) else Color(0xFF1DB954),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+
+                        // Action Controls: Offline Library, AdBlock Toggle, External App, Reload
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            // AdBlocker Toggle Button
+                            IconButton(
+                                onClick = {
+                                    isAdBlockEnabled = !isAdBlockEnabled
+                                    prefs.edit().putBoolean("spotify_adblock_enabled", isAdBlockEnabled).apply()
+                                    webViewInstance?.reload()
+                                    Toast.makeText(
+                                        context,
+                                        if (isAdBlockEnabled) "AdBlocker Enabled 🛡️" else "AdBlocker Disabled",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                },
+                                modifier = Modifier.testTag("spotify_adblock_toggle_btn")
+                            ) {
+                                Icon(
+                                    if (isAdBlockEnabled) Icons.Default.Shield else Icons.Default.Security,
+                                    contentDescription = "Toggle AdBlock",
+                                    tint = if (isAdBlockEnabled) Color(0xFF1DB954) else Color.Gray,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Text(
-                                    if (showOfflineViewOnly) "Offline Mode" else if (isAdBlockEnabled) "AdBlock Active 🛡️" else "Online Mode",
-                                    color = if (showOfflineViewOnly) Color(0xFFFF9800) else Color(0xFF1DB954),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Medium
+                            }
+
+                            // Create Home Screen Shortcut Button
+                            IconButton(
+                                onClick = {
+                                    val ok = ShortcutUtils.createSpotifyShortcut(context, forcePinPrompt = true)
+                                    Toast.makeText(
+                                        context,
+                                        if (ok) "Spotify shortcut added to Home Screen! 📲" else "Could not add shortcut",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                },
+                                modifier = Modifier.testTag("spotify_add_shortcut_btn")
+                            ) {
+                                Icon(
+                                    Icons.Default.BookmarkAdd,
+                                    contentDescription = "Add Shortcut",
+                                    tint = Color.LightGray,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            // Open in Official Spotify App (Hardware DRM support)
+                            IconButton(
+                                onClick = {
+                                    val currentUrl = webViewInstance?.url ?: "https://open.spotify.com"
+                                    try {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl)).apply {
+                                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                        }
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Opening Spotify in browser...", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.testTag("spotify_open_external_btn")
+                            ) {
+                                Icon(
+                                    Icons.Default.OpenInNew,
+                                    contentDescription = "Open in Spotify App",
+                                    tint = Color(0xFF1DB954),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            // Refresh / Home
+                            IconButton(
+                                onClick = {
+                                    if (isOfflineModeForced) {
+                                        isOfflineModeForced = false
+                                    }
+                                    if (currentMode == SpotifyPlayerMode.SEARCH_STREAM) {
+                                        searchOnlineTracks(searchQuery.ifBlank { "Top Hits 2025" })
+                                    } else {
+                                        webViewInstance?.loadUrl("https://open.spotify.com")
+                                    }
+                                },
+                                modifier = Modifier.testTag("spotify_home_btn")
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Refresh",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
                     }
 
-                    // Action Controls: Offline Library, AdBlock Toggle, Reload/Home
+                    // Mode Selection Tabs: Search & Stream, Spotify Web, Offline Library
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Offline Songs Library Button with badge
-                        BadgedBox(
-                            badge = {
-                                if (offlineSongsList.isNotEmpty()) {
-                                    Badge(
-                                        containerColor = Color(0xFF1DB954),
-                                        contentColor = Color.Black
-                                    ) {
-                                        Text("${offlineSongsList.size}")
-                                    }
-                                }
-                            }
-                        ) {
-                            IconButton(
-                                onClick = { showOfflineLibraryModal = true },
-                                modifier = Modifier.testTag("spotify_offline_library_btn")
-                            ) {
-                                Icon(
-                                    Icons.Default.FolderSpecial,
-                                    contentDescription = "Offline Library",
-                                    tint = Color(0xFF1DB954)
-                                )
-                            }
-                        }
-
-                        // AdBlocker Toggle Button
-                        IconButton(
+                        // 1. Search & Stream Mode (Instant sound)
+                        FilterChip(
+                            selected = currentMode == SpotifyPlayerMode.SEARCH_STREAM && !showOfflineViewOnly,
                             onClick = {
-                                isAdBlockEnabled = !isAdBlockEnabled
-                                prefs.edit().putBoolean("spotify_adblock_enabled", isAdBlockEnabled).apply()
-                                webViewInstance?.reload()
-                                Toast.makeText(
-                                    context,
-                                    if (isAdBlockEnabled) "AdBlocker Enabled 🛡️" else "AdBlocker Disabled",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            },
-                            modifier = Modifier.testTag("spotify_adblock_toggle_btn")
-                        ) {
-                            Icon(
-                                if (isAdBlockEnabled) Icons.Default.Shield else Icons.Default.Security,
-                                contentDescription = "Toggle AdBlock",
-                                tint = if (isAdBlockEnabled) Color(0xFF1DB954) else Color.Gray
-                            )
-                        }
-
-                        // Create Home Screen Shortcut Button
-                        IconButton(
-                            onClick = {
-                                val ok = ShortcutUtils.createSpotifyShortcut(context, forcePinPrompt = true)
-                                Toast.makeText(
-                                    context,
-                                    if (ok) "Spotify shortcut added to Home Screen! 📲" else "Could not add shortcut",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            },
-                            modifier = Modifier.testTag("spotify_add_shortcut_btn")
-                        ) {
-                            Icon(
-                                Icons.Default.BookmarkAdd,
-                                contentDescription = "Add Shortcut",
-                                tint = Color.LightGray
-                            )
-                        }
-
-                        // Open in Spotify App or External Browser (Lossless hardware DRM)
-                        IconButton(
-                            onClick = {
-                                val currentUrl = webViewInstance?.url ?: "https://open.spotify.com"
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl)).apply {
-                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                    }
-                                    context.startActivity(intent)
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Opening in browser...", Toast.LENGTH_SHORT).show()
+                                currentMode = SpotifyPlayerMode.SEARCH_STREAM
+                                isOfflineModeForced = false
+                                if (onlineSearchResults.isEmpty()) {
+                                    searchOnlineTracks("Top Hits")
                                 }
                             },
-                            modifier = Modifier.testTag("spotify_open_external_btn")
-                        ) {
-                            Icon(
-                                Icons.Default.OpenInNew,
-                                contentDescription = "Open in Spotify App / Browser",
-                                tint = Color(0xFF1DB954)
-                            )
-                        }
+                            label = { Text("⚡ Search & Stream", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFF1DB954),
+                                selectedLabelColor = Color.Black,
+                                containerColor = Color(0xFF282828),
+                                labelColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.weight(1f)
+                        )
 
-                        // Home / Refresh Button
-                        IconButton(
+                        // 2. Web Player Mode
+                        FilterChip(
+                            selected = currentMode == SpotifyPlayerMode.WEB_BROWSER && !showOfflineViewOnly,
                             onClick = {
-                                if (isOfflineModeForced) {
-                                    isOfflineModeForced = false
-                                }
-                                webViewInstance?.loadUrl("https://open.spotify.com")
+                                currentMode = SpotifyPlayerMode.WEB_BROWSER
+                                isOfflineModeForced = false
                             },
-                            modifier = Modifier.testTag("spotify_home_btn")
-                        ) {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Refresh",
-                                tint = Color.White
-                            )
-                        }
+                            label = { Text("🌐 Spotify Web", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFF1DB954),
+                                selectedLabelColor = Color.Black,
+                                containerColor = Color(0xFF282828),
+                                labelColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // 3. Offline Songs Library
+                        FilterChip(
+                            selected = showOfflineViewOnly,
+                            onClick = {
+                                isOfflineModeForced = !isOfflineModeForced
+                            },
+                            label = { Text("💾 Saved (${offlineSongsList.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFFF9800),
+                                selectedLabelColor = Color.Black,
+                                containerColor = Color(0xFF282828),
+                                labelColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }
         },
         bottomBar = {
-            // Active Track Player / Download Action Bar at bottom
-            if (!showOfflineViewOnly && currentTrackTitle != "No track playing") {
-                val downloadedItem = isTrackDownloaded(currentTrackTitle, currentArtistName)
+            // Unified Active Track Player / Direct Streamer / Downloader Bar
+            if (currentTrackTitle != "No track playing" || playingOfflineSong != null || activeStreamingTrack != null || isOfflinePlaying) {
+                val displayTitle = playingOfflineSong?.title ?: activeStreamingTrack?.title ?: currentTrackTitle
+                val displayArtist = playingOfflineSong?.artist ?: activeStreamingTrack?.artist ?: currentArtistName
+                val displayCover = playingOfflineSong?.coverArtUrl ?: activeStreamingTrack?.coverUrl ?: currentCoverArtUrl
+                val downloadedItem = isTrackDownloaded(displayTitle, displayArtist)
 
                 Surface(
-                    color = Color(0xFF181818),
-                    tonalElevation = 8.dp,
+                    color = Color(0xFF1E1E1E),
+                    tonalElevation = 10.dp,
+                    shadowElevation = 8.dp,
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -703,14 +933,14 @@ fun SpotifyWebBrowserScreen(
                             .navigationBarsPadding()
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        // Downloading Lock Banner
+                        // Downloading Progress Banner
                         if (isDownloadingAndRecording) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(Color(0xFFE91E63))
-                                    .padding(8.dp),
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
@@ -719,12 +949,12 @@ fun SpotifyWebBrowserScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
+                                        modifier = Modifier.size(16.dp),
                                         color = Color.White,
                                         strokeWidth = 2.dp
                                     )
                                     Text(
-                                        "Recording Track Audio... Controls Locked (${recordingProgressSec}s / ${recordingTargetDurationSec}s)",
+                                        "Downloading song audio (${recordingProgressSec}s / ${recordingTargetDurationSec}s)...",
                                         color = Color.White,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
@@ -734,12 +964,13 @@ fun SpotifyWebBrowserScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                         }
 
+                        // Track Details & Primary Playback Controls
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            // Track Thumbnail & Title
+                            // Cover Art & Title Info
                             Row(
                                 modifier = Modifier.weight(1f),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -747,21 +978,33 @@ fun SpotifyWebBrowserScreen(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(RoundedCornerShape(6.dp))
+                                        .size(46.dp)
+                                        .clip(RoundedCornerShape(8.dp))
                                         .background(Color(0xFF282828)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        Icons.Default.MusicNote,
-                                        contentDescription = null,
-                                        tint = Color(0xFF1DB954)
-                                    )
+                                    if (displayCover.isNotBlank()) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(displayCover)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Default.MusicNote,
+                                            contentDescription = null,
+                                            tint = Color(0xFF1DB954)
+                                        )
+                                    }
                                 }
 
                                 Column {
                                     Text(
-                                        currentTrackTitle,
+                                        displayTitle,
                                         color = Color.White,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
@@ -769,8 +1012,8 @@ fun SpotifyWebBrowserScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        currentArtistName,
-                                        color = Color.Gray,
+                                        displayArtist,
+                                        color = if (isOfflinePlaying) Color(0xFF1DB954) else Color.Gray,
                                         fontSize = 11.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -778,59 +1021,116 @@ fun SpotifyWebBrowserScreen(
                                 }
                             }
 
-                            // Download OR Play Offline Button
-                            if (downloadedItem != null) {
-                                // Already Downloaded -> Show PLAY button
-                                Button(
+                            // Controls Row: Play/Pause/Stream & Download
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                // 1. Direct Play/Pause Audio Player Button
+                                IconButton(
                                     onClick = {
-                                        playOfflineTrack(downloadedItem)
-                                        showOfflineLibraryModal = true
+                                        if (isOfflinePlaying) {
+                                            toggleOfflinePlayback()
+                                        } else if (activeStreamingTrack != null) {
+                                            playOnlineStreamTrack(activeStreamingTrack!!)
+                                        } else {
+                                            streamDetectedWebTrack(displayTitle, displayArtist)
+                                        }
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DB954)),
-                                    shape = RoundedCornerShape(20.dp),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                    modifier = Modifier.testTag("spotify_play_offline_btn")
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF1DB954))
                                 ) {
                                     Icon(
-                                        Icons.Default.PlayArrow,
-                                        contentDescription = "Play Offline",
+                                        if (isOfflinePlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = "Play Audio",
                                         tint = Color.Black,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Play Offline", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
-                            } else {
-                                // NOT Downloaded -> Show DOWNLOAD button
-                                Button(
-                                    onClick = {
-                                        startSongDownloadAndRecording(
-                                            title = currentTrackTitle,
-                                            artist = currentArtistName,
-                                            coverUrl = currentCoverArtUrl,
-                                            duration = trackDurationSec
+
+                                // 2. Stream Live Track (if on web and not currently playing sound)
+                                if (!isOfflinePlaying && activeStreamingTrack == null && currentMode == SpotifyPlayerMode.WEB_BROWSER) {
+                                    Button(
+                                        onClick = {
+                                            streamDetectedWebTrack(displayTitle, displayArtist)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
+                                        shape = RoundedCornerShape(16.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.GraphicEq,
+                                            contentDescription = "Stream Audio",
+                                            tint = Color(0xFF1DB954),
+                                            modifier = Modifier.size(14.dp)
                                         )
-                                    },
-                                    enabled = !isDownloadingAndRecording,
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DB954)),
-                                    shape = RoundedCornerShape(20.dp),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                    modifier = Modifier.testTag("spotify_download_song_btn")
-                                ) {
-                                    Icon(
-                                        Icons.Default.Download,
-                                        contentDescription = "Download",
-                                        tint = Color.Black,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        if (isDownloadingAndRecording) "Recording..." else "Download",
-                                        color = Color.Black,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Stream Sound", color = Color.White, fontSize = 11.sp)
+                                    }
                                 }
+
+                                // 3. Download / Play Offline Action
+                                if (downloadedItem != null) {
+                                    IconButton(
+                                        onClick = {
+                                            playOfflineTrack(downloadedItem)
+                                            showOfflineLibraryModal = true
+                                        }
+                                    ) {
+                                        Icon(
+                                            Icons.Default.FolderSpecial,
+                                            contentDescription = "Saved Offline",
+                                            tint = Color(0xFF1DB954),
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                } else {
+                                    IconButton(
+                                        onClick = {
+                                            startSongDownloadAndRecording(
+                                                title = displayTitle,
+                                                artist = displayArtist,
+                                                coverUrl = displayCover,
+                                                duration = trackDurationSec
+                                            )
+                                        },
+                                        enabled = !isDownloadingAndRecording
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Download,
+                                            contentDescription = "Download Song",
+                                            tint = Color(0xFF1DB954),
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Seekbar / Audio Progress Bar
+                        if (offlineDurationMs > 0 && isOfflinePlaying) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Slider(
+                                value = offlinePlaybackPosMs.toFloat().coerceIn(0f, offlineDurationMs.toFloat()),
+                                onValueChange = { offlineMediaPlayer?.seekTo(it.toInt()) },
+                                valueRange = 0f..offlineDurationMs.toFloat(),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color(0xFF1DB954),
+                                    activeTrackColor = Color(0xFF1DB954),
+                                    inactiveTrackColor = Color(0xFF333333)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(18.dp)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(formatTimeMs(offlinePlaybackPosMs), color = Color.Gray, fontSize = 9.sp)
+                                Text(formatTimeMs(offlineDurationMs), color = Color.Gray, fontSize = 9.sp)
                             }
                         }
                     }
@@ -883,8 +1183,34 @@ fun SpotifyWebBrowserScreen(
                     },
                     onSwitchOnline = {
                         isOfflineModeForced = false
+                        currentMode = SpotifyPlayerMode.WEB_BROWSER
                         webViewInstance?.loadUrl("https://open.spotify.com")
                     }
+                )
+            } else if (currentMode == SpotifyPlayerMode.SEARCH_STREAM) {
+                // INSTANT STREAM & SEARCH MODE (Blazing Fast, Immediate Sound)
+                SpotifyOnlineSearchView(
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = {
+                        searchQuery = it
+                        searchOnlineTracks(it)
+                    },
+                    onSearchSubmit = { searchOnlineTracks(it) },
+                    isSearching = isSearchingOnline,
+                    tracks = onlineSearchResults,
+                    activeTrack = activeStreamingTrack,
+                    isPlaying = isOfflinePlaying,
+                    onPlayTrack = { playOnlineStreamTrack(it) },
+                    onTogglePlay = { toggleOfflinePlayback() },
+                    onDownloadTrack = { track ->
+                        startSongDownloadAndRecording(
+                            title = track.title,
+                            artist = track.artist,
+                            coverUrl = track.coverUrl,
+                            duration = track.durationSec
+                        )
+                    },
+                    isTrackDownloaded = { t, a -> isTrackDownloaded(t, a) != null }
                 )
             } else {
                 // ONLINE MODE: Spotify WebView + AdBlocker + Track Metadata Extraction JS
@@ -895,25 +1221,7 @@ fun SpotifyWebBrowserScreen(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
                             )
-                            val cookieManager = android.webkit.CookieManager.getInstance()
-                            cookieManager.setAcceptCookie(true)
-                            cookieManager.setAcceptThirdPartyCookies(this, true)
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                databaseEnabled = true
-                                mediaPlaybackRequiresUserGesture = false
-                                useWideViewPort = true
-                                loadWithOverviewMode = true
-                                allowFileAccess = true
-                                allowContentAccess = true
-                                javaScriptCanOpenWindowsAutomatically = true
-                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
-                                setRenderPriority(WebSettings.RenderPriority.HIGH)
-                                cacheMode = WebSettings.LOAD_DEFAULT
-                            }
-                            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                            WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
 
                             // JS Bridge for track metadata callback
                             addJavascriptInterface(
@@ -1263,15 +1571,9 @@ fun SpotifyWebBrowserScreen(
                                 }
 
                                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                                    val reqUrl = request?.url?.toString() ?: ""
                                     if (isAdBlockEnabled) {
-                                        val adDomains = listOf(
-                                            "doubleclick.net", "googlesyndication.com", "pagead2.googlesyndication.com",
-                                            "adservice.google.com", "scorecardresearch.com"
-                                        )
-                                        if (adDomains.any { reqUrl.contains(it, ignoreCase = true) }) {
-                                            return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream("".toByteArray()))
-                                        }
+                                        val blocked = com.example.util.WebViewTurboHelper.shouldBlockAdRequest(request)
+                                        if (blocked != null) return blocked
                                     }
                                     return super.shouldInterceptRequest(view, request)
                                 }
@@ -1671,3 +1973,257 @@ private fun formatTimeMs(ms: Int): String {
     val sec = totalSec % 60
     return String.format(Locale.getDefault(), "%d:%02d", min, sec)
 }
+
+@Composable
+fun SpotifyOnlineSearchView(
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onSearchSubmit: (String) -> Unit,
+    isSearching: Boolean,
+    tracks: List<SpotifyOnlineTrack>,
+    activeTrack: SpotifyOnlineTrack?,
+    isPlaying: Boolean,
+    onPlayTrack: (SpotifyOnlineTrack) -> Unit,
+    onTogglePlay: () -> Unit,
+    onDownloadTrack: (SpotifyOnlineTrack) -> Unit,
+    isTrackDownloaded: (String, String) -> Boolean
+) {
+    val quickPills = listOf(
+        "Top Hits 2025", "Taylor Swift", "The Weeknd", "Billie Eilish",
+        "Arijit Singh", "Drake", "Ed Sheeran", "Lofi Chill", "Pop", "Rock", "Hip Hop"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        // Search Input Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            placeholder = { Text("Search songs, artists, albums...", color = Color.Gray, fontSize = 14.sp) },
+            leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF1DB954))
+            },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { onSearchQueryChange("") }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color.Gray)
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(24.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color(0xFF222222),
+                unfocusedContainerColor = Color(0xFF1A1A1A),
+                focusedBorderColor = Color(0xFF1DB954),
+                unfocusedBorderColor = Color(0xFF333333),
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                cursorColor = Color(0xFF1DB954)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Quick Category Suggestions
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(quickPills) { pill ->
+                Surface(
+                    color = if (searchQuery == pill) Color(0xFF1DB954) else Color(0xFF282828),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.clickable {
+                        onSearchQueryChange(pill)
+                        onSearchSubmit(pill)
+                    }
+                ) {
+                    Text(
+                        pill,
+                        color = if (searchQuery == pill) Color.Black else Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (isSearching) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(color = Color(0xFF1DB954))
+                    Text("Searching audio catalog...", color = Color.Gray, fontSize = 13.sp)
+                }
+            }
+        } else if (tracks.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(24.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1E1E1E)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.GraphicEq,
+                            contentDescription = null,
+                            tint = Color(0xFF1DB954),
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                    Text(
+                        "Search & Stream Instant Audio",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Type any song name above or select a trending tag to stream high quality music instantly with full audio playback and offline saving.",
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            // Track Results List
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(tracks, key = { it.id }) { track ->
+                    val isCurrent = activeTrack?.id == track.id
+                    val downloaded = isTrackDownloaded(track.title, track.artist)
+
+                    Surface(
+                        color = if (isCurrent) Color(0xFF243324) else Color(0xFF1A1A1A),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPlayTrack(track) }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Cover Artwork & Track Metadata
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF282828)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (track.coverUrl.isNotBlank()) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(track.coverUrl)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Icon(Icons.Default.MusicNote, contentDescription = null, tint = Color(0xFF1DB954))
+                                    }
+                                }
+
+                                Column {
+                                    Text(
+                                        track.title,
+                                        color = if (isCurrent) Color(0xFF1DB954) else Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        if (track.album.isNotBlank()) "${track.artist} • ${track.album}" else track.artist,
+                                        color = Color.Gray,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            // Play & Download Action Buttons
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                // Play / Pause Button
+                                IconButton(
+                                    onClick = {
+                                        if (isCurrent) {
+                                            onTogglePlay()
+                                        } else {
+                                            onPlayTrack(track)
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        if (isCurrent && isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
+                                        contentDescription = "Play",
+                                        tint = Color(0xFF1DB954),
+                                        modifier = Modifier.size(34.dp)
+                                    )
+                                }
+
+                                // Download Song Button
+                                IconButton(
+                                    onClick = { onDownloadTrack(track) }
+                                ) {
+                                    Icon(
+                                        if (downloaded) Icons.Default.CheckCircle else Icons.Default.Download,
+                                        contentDescription = if (downloaded) "Saved" else "Download",
+                                        tint = if (downloaded) Color(0xFF1DB954) else Color.LightGray,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

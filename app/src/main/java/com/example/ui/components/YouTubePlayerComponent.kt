@@ -368,14 +368,7 @@ fun YouTubePlayerDialog(
                                     }
                                 }
                                 webChromeClient = WebChromeClient()
-                                settings.apply {
-                                    javaScriptEnabled = true
-                                    mediaPlaybackRequiresUserGesture = false
-                                    domStorageEnabled = true
-                                    loadWithOverviewMode = true
-                                    useWideViewPort = true
-                                    userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-                                }
+                                com.example.util.WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
                                 loadUrl("https://www.youtube.com/embed/$videoId?autoplay=1&fs=1")
                             }
                         },

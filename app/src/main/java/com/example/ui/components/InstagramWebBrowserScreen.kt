@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -569,22 +570,13 @@ fun InstagramWebBrowserScreen(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
-                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        databaseEnabled = true
-                        useWideViewPort = true
-                        loadWithOverviewMode = true
-                        allowFileAccess = false
-                        mediaPlaybackRequiresUserGesture = false
-                        javaScriptCanOpenWindowsAutomatically = true
-                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                        userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-                        setRenderPriority(WebSettings.RenderPriority.HIGH)
-                        cacheMode = WebSettings.LOAD_DEFAULT
-                    }
+                    com.example.util.WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
                     webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                            val blocked = com.example.util.WebViewTurboHelper.shouldBlockAdRequest(request)
+                            if (blocked != null) return blocked
+                            return super.shouldInterceptRequest(view, request)
+                        }
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             super.onPageStarted(view, url, favicon)
                             isLoading = true

@@ -6447,22 +6447,11 @@ fun GoogleDocumentViewer(viewModel: AppViewModel, title: String, docUrl: String,
                                 cookieManager.setAcceptCookie(true)
                                 cookieManager.setAcceptThirdPartyCookies(this, true)
 
-                                settings.apply {
-                                    javaScriptEnabled = true
-                                    domStorageEnabled = true
-                                    databaseEnabled = true
-                                    loadWithOverviewMode = if (isPdfOrDrive) true else isDesktopMode
-                                    useWideViewPort = if (isPdfOrDrive) true else isDesktopMode
-                                    setSupportZoom(true)
-                                    builtInZoomControls = false
-                                    javaScriptCanOpenWindowsAutomatically = true
-                                    allowFileAccess = true
-                                    allowContentAccess = true
-                                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                    
-                                    // Enforce Desktop Mode to enable full Docs/Sheets/PDF features online!
-                                    userAgentString = desktopUserAgent
-                                }
+                                com.example.util.WebViewTurboHelper.applyTurboSettings(
+                                    this,
+                                    isDesktopMode = isDesktopMode,
+                                    customUserAgent = if (isDesktopMode) desktopUserAgent else null
+                                )
                                 
                                 webViewClient = object : android.webkit.WebViewClient() {
                                     override fun shouldOverrideUrlLoading(

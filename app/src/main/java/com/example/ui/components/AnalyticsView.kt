@@ -579,10 +579,7 @@ fun AnalyticsView(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                         AndroidView(
                             factory = { context ->
                                 WebView(context).apply {
-                                    settings.javaScriptEnabled = true
-                                    settings.domStorageEnabled = true
-                                    settings.useWideViewPort = true
-                                    settings.loadWithOverviewMode = true
+                                    com.example.util.WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
                                     settings.setSupportZoom(false)
                                     setBackgroundColor(0) // Safe transparent backdrop
                                     webViewClient = WebViewClient()

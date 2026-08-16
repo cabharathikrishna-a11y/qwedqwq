@@ -122,19 +122,7 @@ object PersistentWebMediaManager {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                mediaPlaybackRequiresUserGesture = false
-                useWideViewPort = true
-                loadWithOverviewMode = true
-                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
-                setRenderPriority(WebSettings.RenderPriority.HIGH)
-                cacheMode = WebSettings.LOAD_DEFAULT
-            }
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
 
             // JavaScript bridge to receive live playback status, duration, and video metadata from YouTube DOM
             addJavascriptInterface(
@@ -243,21 +231,8 @@ object PersistentWebMediaManager {
                         return super.shouldInterceptRequest(view, request)
                     }
                     if (isAdBlockEnabled) {
-                        val url = reqUrl.lowercase()
-                        if (url.contains("googleads") ||
-                            url.contains("doubleclick") ||
-                            url.contains("googlesyndication") ||
-                            url.contains("googleadservices") ||
-                            url.contains("youtube.com/pagead/") ||
-                            url.contains("youtube.com/api/stats/ads") ||
-                            url.contains("youtube.com/ptracking") ||
-                            url.contains("youtube.com/get_midroll_info") ||
-                            url.contains("adservice.google") ||
-                            url.contains("/adunit") ||
-                            url.contains("/ad_status")
-                        ) {
-                            return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
-                        }
+                        val blocked = WebViewTurboHelper.shouldBlockAdRequest(request)
+                        if (blocked != null) return blocked
                     }
                     return super.shouldInterceptRequest(view, request)
                 }
@@ -537,25 +512,7 @@ object PersistentWebMediaManager {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            val cookieManager = android.webkit.CookieManager.getInstance()
-            cookieManager.setAcceptCookie(true)
-            cookieManager.setAcceptThirdPartyCookies(this, true)
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                mediaPlaybackRequiresUserGesture = false
-                useWideViewPort = true
-                loadWithOverviewMode = true
-                allowFileAccess = true
-                allowContentAccess = true
-                javaScriptCanOpenWindowsAutomatically = true
-                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
-                setRenderPriority(WebSettings.RenderPriority.HIGH)
-                cacheMode = WebSettings.LOAD_DEFAULT
-            }
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
 
             // Bridge to extract live Spotify track info
             addJavascriptInterface(
@@ -611,12 +568,8 @@ object PersistentWebMediaManager {
                 }
 
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                    val reqUrl = request?.url?.toString()?.lowercase() ?: ""
-                    if (reqUrl.contains("doubleclick.net") || reqUrl.contains("googlesyndication.com") ||
-                        reqUrl.contains("pagead2.googlesyndication.com") || reqUrl.contains("adservice.google") ||
-                        reqUrl.contains("scorecardresearch.com")) {
-                        return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
-                    }
+                    val blocked = WebViewTurboHelper.shouldBlockAdRequest(request)
+                    if (blocked != null) return blocked
                     return super.shouldInterceptRequest(view, request)
                 }
             }
@@ -682,48 +635,21 @@ object PersistentWebMediaManager {
                     configurable: true
                 });
 
-                // Polyfill EME (Encrypted Media Extensions) for Spotify Widevine Protected Content
-                if (!navigator.requestMediaKeySystemAccess || !window.__spotifyEmeShimmed) {
-                    window.__spotifyEmeShimmed = true;
-                    var origReq = navigator.requestMediaKeySystemAccess;
-                    navigator.requestMediaKeySystemAccess = function(keySystem, supportedConfigurations) {
-                        if (keySystem === 'com.widevine.alpha' || keySystem === 'org.w3.clearkey' || (keySystem && keySystem.indexOf('widevine') !== -1)) {
-                            return Promise.resolve({
-                                keySystem: keySystem,
-                                createMediaKeys: function() {
-                                    return Promise.resolve({
-                                        createSession: function() {
-                                            return {
-                                                generateRequest: function() { return Promise.resolve(); },
-                                                load: function() { return Promise.resolve(true); },
-                                                update: function() { return Promise.resolve(); },
-                                                close: function() { return Promise.resolve(); },
-                                                remove: function() { return Promise.resolve(); },
-                                                closed: new Promise(function() {}),
-                                                keyStatuses: new Map(),
-                                                addEventListener: function() {},
-                                                removeEventListener: function() {},
-                                                dispatchEvent: function() { return true; }
-                                            };
-                                        },
-                                        setServerCertificate: function() { return Promise.resolve(true); }
-                                    });
-                                },
-                                getConfiguration: function() {
-                                    return (supportedConfigurations && supportedConfigurations[0]) || {
-                                        initDataTypes: ['cenc', 'keyids', 'webm'],
-                                        audioCapabilities: [
-                                            { contentType: 'audio/mp4; codecs="mp4a.40.2"' },
-                                            { contentType: 'audio/webm; codecs="opus"' }
-                                        ]
-                                    };
-                                }
-                            });
+                // Audio unlocker & unmuter for HTML5 audio elements in WebView
+                document.addEventListener('click', function() {
+                    try {
+                        if (window.AudioContext || window.webkitAudioContext) {
+                            var AudioCtx = window.AudioContext || window.webkitAudioContext;
+                            var ctx = new AudioCtx();
+                            if (ctx.state === 'suspended') ctx.resume();
                         }
-                        if (origReq) return origReq.apply(navigator, arguments);
-                        return Promise.reject(new Error('Unsupported keySystem'));
-                    };
-                }
+                        var mediaElements = document.querySelectorAll('audio, video');
+                        mediaElements.forEach(function(el) {
+                            el.muted = false;
+                            el.volume = 1.0;
+                        });
+                    } catch(e) {}
+                }, { passive: true, capture: true });
 
                 if (navigator.mediaCapabilities) {
                     navigator.mediaCapabilities.decodingInfo = function(config) {
@@ -731,10 +657,7 @@ object PersistentWebMediaManager {
                             supported: true,
                             smooth: true,
                             powerEfficient: true,
-                            keySystemAccess: {
-                                keySystem: 'com.widevine.alpha',
-                                createMediaKeys: function() { return Promise.resolve({}); }
-                            }
+                            keySystemAccess: null
                         });
                     };
                 }
