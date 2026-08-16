@@ -36,6 +36,8 @@ class BootReceiver : BroadcastReceiver() {
                     androidx.work.ExistingWorkPolicy.KEEP,
                     workRequest
                 )
+                // Schedule automated daily contacts sync with Google
+                com.example.worker.DailyContactSyncWorker.scheduleDailySync(context.applicationContext)
             } catch (e: Exception) {
                 Log.e("BootReceiver", "Failed to enqueue BootRescheduleWorker via WorkManager", e)
             }

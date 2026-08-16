@@ -72,6 +72,9 @@ fun LiveSphereScreen(
     val isPaused by com.example.util.FocusTimerManager.isPaused.collectAsStateWithLifecycle()
     val wasStartedFromStopwatch by com.example.util.FocusTimerManager.wasStartedFromStopwatch.collectAsStateWithLifecycle()
     val accumulatedSessionTimeMs by com.example.util.FocusTimerManager.accumulatedSessionTimeMs.collectAsStateWithLifecycle()
+    val cumulativeSessionFocusSeconds by com.example.util.FocusTimerManager.cumulativeSessionFocusSeconds.collectAsStateWithLifecycle()
+    val allUsers by viewModel.allUsers.collectAsStateWithLifecycle()
+    val optimisticTodaySecs = viewModel.optimisticTodayFocusSeconds.collectAsStateWithLifecycle().value
 
     val myEmail = remember(userEmail, currentUsername) {
         if (userEmail.isNotEmpty()) {
@@ -141,24 +144,56 @@ fun LiveSphereScreen(
     val focusRecordsState by com.example.util.FocusTimerManager.focusRecords.collectAsState()
     val pendingFocusReviewState by com.example.util.FocusTimerManager.pendingFocusReview.collectAsState()
 
-    val completedTodayMs = remember(focusRecordsState, pendingFocusReviewState) {
-        val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
-        val completedTodaySecs = focusRecordsState.sumOf { com.example.util.FocusTimerManager.getOverlapSecondsForDate(it, todayStr) }
-        val pendingSecs = pendingFocusReviewState?.let { com.example.util.FocusTimerManager.getOverlapSecondsForDate(it, todayStr) } ?: 0
-        (completedTodaySecs + pendingSecs) * 1000L
-    }
+    val completedTodaySecs = remember(focusRecordsState, allUsers, myEmail, currentUsername, leaderboard) {
+        val systemTodayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        val localSecs = focusRecordsState.sumOf { com.example.util.FocusTimerManager.getOverlapSecondsForDate(it, systemTodayStr) }
 
-    val myTodayFocusMs = remember(completedTodayMs, isTimerRunning, isStopwatchActive, accumulatedSessionTimeMs) {
-        var localActiveMs = 0L
-        val hasActiveSession = (isTimerRunning || isStopwatchActive || accumulatedSessionTimeMs > 0L) && pendingFocusReviewState == null
-        if (hasActiveSession) {
-            localActiveMs = accumulatedSessionTimeMs
+        val cleanMeEmail = myEmail.lowercase().trim()
+        val meUser = if (cleanMeEmail.isNotEmpty()) {
+            allUsers[cleanMeEmail]
+        } else {
+            currentUsername?.let { allUsers[it.lowercase().trim()] }
         }
-        completedTodayMs + localActiveMs
+        val devicesMap = meUser?.devices ?: emptyMap()
+
+        val currentDeviceKey = com.example.util.DeviceIdProvider.getDeviceId(context)
+        val maxOtherDeviceTodayMs = devicesMap.filterKeys { it != currentDeviceKey }.values
+            .filter { it.lastUpdateDate == systemTodayStr || it.lastUpdateDate.isNullOrEmpty() }
+            .maxOfOrNull { it.todayFocusMs } ?: 0L
+        val maxOtherDeviceTodaySecs = (maxOtherDeviceTodayMs / 1000L).toInt()
+
+        val leaderboardPeer = leaderboard.find { it.isMe || it.email.lowercase().trim() == cleanMeEmail }
+        val leaderboardTodaySecs = ((leaderboardPeer?.totalFocusMs ?: 0L) / 1000L).toInt()
+
+        maxOf(localSecs, maxOtherDeviceTodaySecs, leaderboardTodaySecs)
     }
 
-    val myFormattedTime = remember(myTodayFocusMs) {
-        com.example.api.TimelineSyncEngine.formatTimeMsToHhMmSs(myTodayFocusMs)
+    val pendingSecs = remember(pendingFocusReviewState) {
+        val systemTodayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        pendingFocusReviewState?.let { com.example.util.FocusTimerManager.getOverlapSecondsForDate(it, systemTodayStr) } ?: 0
+    }
+
+    val globalTodaySeconds = remember(completedTodaySecs, pendingSecs, isFocusPhase, cumulativeSessionFocusSeconds, stopwatchSeconds, wasStartedFromStopwatch, pendingFocusReviewState, optimisticTodaySecs, isTimerRunning, isStopwatchActive, isPaused) {
+        val isRunningOrPaused = isTimerRunning || isStopwatchActive || isPaused
+        val activeSecs = if (isFocusPhase && pendingFocusReviewState == null && isRunningOrPaused) {
+            if (wasStartedFromStopwatch) stopwatchSeconds else cumulativeSessionFocusSeconds
+        } else {
+            0
+        }
+        val base = completedTodaySecs + pendingSecs + activeSecs
+        if (optimisticTodaySecs != null) {
+            maxOf(base, optimisticTodaySecs.toInt())
+        } else {
+            base
+        }
+    }
+
+    val myTodayFocusMs = remember(globalTodaySeconds) {
+        globalTodaySeconds * 1000L
+    }
+
+    val myFormattedTime = remember(globalTodaySeconds) {
+        com.example.ui.components.formatLiveSeconds(globalTodaySeconds)
     }
 
     val allParticipantsSorted = remember(filteredPeerUiCards, myTodayFocusMs, myEmail, myDisplayName, userEmoji, leaderboard, historyRecords) {

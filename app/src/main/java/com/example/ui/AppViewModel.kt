@@ -2893,10 +2893,34 @@ class AppViewModel(
                     _googleContactsSyncStatus.value = "Sync failed: ${result.second}"
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
+                throw e
+            } catch (e: Exception) {
                 android.util.Log.e("AppViewModel", "Google Contacts sync failed", e)
                 _googleContactsSyncStatus.value = "Sync failed: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun checkAndRunDailyGoogleContactsSync(context: android.content.Context) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+                val selectedAccount = prefs.getString("selected_contacts_account", null)
+                val googleAccount = com.example.util.GmsUtils.getLastSignedInAccount(context)
+                if (selectedAccount.isNullOrBlank() && googleAccount == null) {
+                    // No active Google account connected; skip background daily sync quietly
+                    return@launch
+                }
+
+                val lastSyncTime = prefs.getLong("last_google_contacts_sync_timestamp", 0L)
+                val oneDayMillis = 24 * 60 * 60 * 1000L
+                val timeSinceLastSync = System.currentTimeMillis() - lastSyncTime
+                if (timeSinceLastSync >= oneDayMillis) {
+                    android.util.Log.d("AppViewModel", "Daily interval reached. Triggering automatic daily Google Contacts sync...")
+                    syncGoogleContacts(context)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("AppViewModel", "Failed checking daily Google Contacts sync: ${e.message}")
             }
         }
     }
@@ -12261,10 +12285,13 @@ data class FocusRankPopupData(
 )
 
 data class SharedFileIntentData(
-    val uri: android.net.Uri,
-    val name: String,
-    val mimeType: String,
-    val flowType: String // "journal", "shared_folder", "private_note"
+    val uri: android.net.Uri = android.net.Uri.EMPTY,
+    val uris: List<android.net.Uri> = emptyList(),
+    val name: String = "",
+    val names: List<String> = emptyList(),
+    val mimeType: String = "",
+    val flowType: String = "", // "journal", "shared_folder", "private_folder", "note"
+    val sharedText: String? = null
 )
 
 data class TemporaryMediaViewData(

@@ -662,11 +662,20 @@ object FocusTimerManager {
         _stopwatchLimitReached.value = value
     }
 
-    fun setTabFocusTimerSelected(value: Boolean) {
+    fun setTabFocusTimerSelected(value: Boolean, syncRemote: Boolean = true) {
         _isTabFocusTimerSelected.value = value
         appContext?.let { ctx ->
             val prefs = ctx.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
             prefs.edit().putBoolean("timer_is_tab_focus_selected", value).apply()
+            if (syncRemote && !isPassiveCalibrationInProgress) {
+                com.example.api.DynamicCommandManager.syncSelectedTimerTab(ctx, value)
+                val email = com.example.api.DynamicCommandManager.activeEmail.ifEmpty {
+                    prefs.getString("user_email", "") ?: ""
+                }
+                if (email.isNotBlank()) {
+                    com.example.api.UserSettingsSyncEngine.pushSettingsToCloud(ctx, email)
+                }
+            }
         }
     }
 

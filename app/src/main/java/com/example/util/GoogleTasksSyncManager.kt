@@ -1452,15 +1452,23 @@ object GoogleContactsSyncManager {
         context: Context,
         onAuthResolutionRequired: (Intent) -> Unit = {}
     ): String? = withContext(Dispatchers.IO) {
+        if (!GmsUtils.isGmsAvailable(context)) return@withContext null
         try {
             val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
             var email = prefs.getString("selected_contacts_account", null)
             if (email.isNullOrBlank()) {
-                val account = try { GoogleSignIn.getLastSignedInAccount(context) } catch (e: Throwable) { null }
-                email = account?.email ?: "cabharathikrishan@gmail.com"
+                val account = GmsUtils.getLastSignedInAccount(context) ?: try { GoogleSignIn.getLastSignedInAccount(context) } catch (_: Throwable) { null }
+                email = account?.email
             }
             if (email.isNullOrBlank()) {
-                Log.w(TAG, "No Google account email found.")
+                val am = try { android.accounts.AccountManager.get(context) } catch (_: Throwable) { null }
+                val accounts = try { am?.getAccountsByType("com.google") } catch (_: Throwable) { null }
+                if (!accounts.isNullOrEmpty()) {
+                    email = accounts[0].name
+                }
+            }
+            if (email.isNullOrBlank()) {
+                Log.d(TAG, "No signed-in Google account found on device.")
                 return@withContext null
             }
             GoogleAuthUtil.getToken(context, email, CONTACTS_SCOPE)
@@ -1468,10 +1476,17 @@ object GoogleContactsSyncManager {
             Log.w(TAG, "User recoverable auth exception encountered for Contacts scope.", recoverable)
             recoverable.intent?.let { intent -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onAuthResolutionRequired(intent) } }
             null
+        } catch (ioe: java.io.IOException) {
+            if (ioe.message?.contains("AccountNotPresent", ignoreCase = true) == true) {
+                Log.d(TAG, "Google account is not present in device account manager: ${ioe.message}")
+            } else {
+                Log.w(TAG, "IO exception obtaining Google token for Contacts: ${ioe.message}")
+            }
+            null
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Error obtaining Google OAuth2 token for Contacts: ${e.message}", e)
+            Log.w(TAG, "Error obtaining Google OAuth2 token for Contacts: ${e.message}")
             null
         }
     }
@@ -1480,6 +1495,8 @@ object GoogleContactsSyncManager {
      * Performs a full 2-way sync:
      * 1. Pulls contacts from Google Contacts and updates/creates them locally.
      * 2. Pushes local contacts that are new or updated to Google Contacts.
+     * 3. Syncs custom fields (Instagram ID/Link, Snapchat ID/Link, general text fields) & DOB for existing and new contacts.
+     * 4. Downloads profile pictures for instant local display and uploads local photos to Google Contacts.
      */
     suspend fun syncContacts(
         context: Context,
@@ -1512,6 +1529,9 @@ object GoogleContactsSyncManager {
                     foldersChanged = true
                 }
 
+                // Download and cache profile photo locally for instant offline loading
+                val localPhotoPath = cacheContactPhotoLocally(context, gContact.resourceName, gContact.photoUrl)
+
                 // Try to find matching local contact by googleContactId or fallback to names
                 val matchedLocal = localContacts.find { it.googleContactId == gContact.resourceName }
                     ?: localContacts.find { 
@@ -1521,7 +1541,8 @@ object GoogleContactsSyncManager {
                     }
 
                 if (matchedLocal != null) {
-                    // Update existing local contact
+                    // Update existing local contact (including updated DOB, custom fields, photo, etc.)
+                    val mergedCustomFields = mergeCustomFields(matchedLocal.additionalFieldsJson, gContact.additionalFieldsJson)
                     val updated = matchedLocal.copy(
                         firstName = if (gContact.firstName.isNotEmpty()) gContact.firstName else matchedLocal.firstName,
                         middleName = if (gContact.middleName.isNotEmpty()) gContact.middleName else matchedLocal.middleName,
@@ -1531,26 +1552,28 @@ object GoogleContactsSyncManager {
                         address = if (gContact.address.isNotEmpty()) gContact.address else matchedLocal.address,
                         jobTitle = if (gContact.jobTitle.isNotEmpty()) gContact.jobTitle else matchedLocal.jobTitle,
                         dobString = if (gContact.dobString.isNotEmpty()) gContact.dobString else matchedLocal.dobString,
-                        photoUri = if (!gContact.photoUrl.isNullOrEmpty()) gContact.photoUrl else matchedLocal.photoUri,
+                        photoUri = if (!localPhotoPath.isNullOrEmpty()) localPhotoPath else matchedLocal.photoUri,
                         anniversaryString = if (gContact.anniversaryString.isNotEmpty()) gContact.anniversaryString else matchedLocal.anniversaryString,
+                        additionalFieldsJson = mergedCustomFields,
                         additionalDatesJson = if (gContact.additionalDatesJson.isNotEmpty()) gContact.additionalDatesJson else matchedLocal.additionalDatesJson,
                         folder = gContact.folder, // Fully synchronized label/folder
                         googleContactId = gContact.resourceName
                     )
                     contactDao.updateContact(updated)
                 } else {
-                    // Create new local contact (including name, phone, email, address, job title, dob, profile pic, and dates)
+                    // Create new local contact
                     val newContact = Contact(
                         firstName = gContact.firstName,
                         middleName = gContact.middleName,
                         lastName = gContact.lastName,
                         phone = gContact.phone,
                         dobString = gContact.dobString,
-                        photoUri = gContact.photoUrl,
+                        photoUri = localPhotoPath ?: gContact.photoUrl,
                         email = gContact.email,
                         address = gContact.address,
                         jobTitle = gContact.jobTitle,
                         anniversaryString = gContact.anniversaryString,
+                        additionalFieldsJson = gContact.additionalFieldsJson,
                         additionalDatesJson = gContact.additionalDatesJson,
                         folder = gContact.folder, // Fully synchronized label/folder
                         googleContactId = gContact.resourceName
@@ -1588,9 +1611,9 @@ object GoogleContactsSyncManager {
                     // It was already synced. Let's see if it still exists on Google
                     val existsOnGoogle = googleIdToConnection.containsKey(local.googleContactId)
                     if (existsOnGoogle) {
-                        // Let's update Google if local info is different
+                        // Let's update Google if local info is different (including DOB, custom fields, photo)
                         val gContact = googleIdToConnection[local.googleContactId]!!
-                        if (local.firstName != gContact.firstName ||
+                        val fieldsChanged = local.firstName != gContact.firstName ||
                             local.middleName != gContact.middleName ||
                             local.lastName != gContact.lastName ||
                             local.phone != gContact.phone ||
@@ -1599,10 +1622,17 @@ object GoogleContactsSyncManager {
                             local.jobTitle != gContact.jobTitle ||
                             local.dobString != gContact.dobString ||
                             local.anniversaryString != gContact.anniversaryString ||
+                            local.additionalFieldsJson != gContact.additionalFieldsJson ||
                             local.additionalDatesJson != gContact.additionalDatesJson ||
                             local.folder != gContact.folder
-                        ) {
+
+                        if (fieldsChanged) {
                             updateGoogleContact(token, local, targetGroupResourceName)
+                        }
+
+                        // Check and push profile photo if local has photo
+                        if (!local.photoUri.isNullOrEmpty() && (gContact.photoUrl.isNullOrEmpty() || local.photoUri.startsWith("/"))) {
+                            uploadGoogleContactPhoto(context, token, local.googleContactId, local.photoUri)
                         }
                     } else {
                         // It was deleted on Google, so we can clear the googleContactId
@@ -1623,6 +1653,12 @@ object GoogleContactsSyncManager {
                 }
             }
 
+            // Save daily sync timestamp and success status
+            prefs.edit()
+                .putLong("last_google_contacts_sync_timestamp", System.currentTimeMillis())
+                .putString("last_google_contacts_sync_date", java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(java.util.Date()))
+                .apply()
+
             Pair(true, "Successfully completed 2-way sync with Google Contacts (${googleContacts.size} Google contacts synced).")
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -1630,6 +1666,45 @@ object GoogleContactsSyncManager {
             Log.e(TAG, "Error performing Google Contacts 2-way sync: ${e.message}", e)
             Pair(false, "Sync Error: ${e.localizedMessage ?: "Unknown error"}")
         }
+    }
+
+    private fun cacheContactPhotoLocally(context: Context, resourceName: String, photoUrl: String?): String? {
+        if (photoUrl.isNullOrBlank()) return null
+        return try {
+            val safeName = resourceName.replace("/", "_").replace(":", "_")
+            val destFile = com.example.util.InternalStorageManager.getFile(
+                context,
+                com.example.util.InternalStorageManager.Category.CONTACTS,
+                "g_avatar_${safeName}.jpg"
+            )
+            if (destFile.exists() && destFile.length() > 0) {
+                return destFile.absolutePath
+            }
+            val photoBytes = SystemContactSyncHelper.getContactPhotoBytes(context, photoUrl)
+            if (photoBytes != null && photoBytes.isNotEmpty()) {
+                destFile.writeBytes(photoBytes)
+                destFile.absolutePath
+            } else {
+                photoUrl
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed caching contact photo locally for $resourceName", e)
+            photoUrl
+        }
+    }
+
+    private fun mergeCustomFields(localStr: String, remoteStr: String): String {
+        val localPairs = com.example.util.ContactSocialHelper.parseCustomFields(localStr).toMutableList()
+        val remotePairs = com.example.util.ContactSocialHelper.parseCustomFields(remoteStr)
+        for (rp in remotePairs) {
+            val existingIdx = localPairs.indexOfFirst { it.first.equals(rp.first, ignoreCase = true) }
+            if (existingIdx >= 0) {
+                localPairs[existingIdx] = rp
+            } else {
+                localPairs.add(rp)
+            }
+        }
+        return com.example.util.ContactSocialHelper.serializeCustomFields(localPairs)
     }
 
     private fun sanitizePhone(phone: String): String {
@@ -1649,6 +1724,7 @@ object GoogleContactsSyncManager {
         val address: String,
         val jobTitle: String,
         val anniversaryString: String,
+        val additionalFieldsJson: String,
         val additionalDatesJson: String,
         val folder: String
     )
@@ -1719,7 +1795,7 @@ object GoogleContactsSyncManager {
     }
 
     private suspend fun fetchGoogleConnections(token: String, groupMap: Map<String, String>): List<GoogleContactDetails> {
-        val url = "https://people.googleapis.com/v1/people/me/connections?personFields=names,phoneNumbers,birthdays,photos,emailAddresses,addresses,organizations,events,memberships&pageSize=1000"
+        val url = "https://people.googleapis.com/v1/people/me/connections?personFields=names,phoneNumbers,birthdays,photos,emailAddresses,addresses,organizations,events,memberships,userDefined,urls,biographies&pageSize=1000"
         val request = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $token")
@@ -1734,7 +1810,6 @@ object GoogleContactsSyncManager {
                 return emptyList()
             }
             val bodyStr = response.body?.string() ?: ""
-            Log.d(TAG, "fetchGoogleConnections Response JSON: $bodyStr")
             val json = JSONObject(bodyStr)
             val connections = json.optJSONArray("connections") ?: return emptyList()
 
@@ -1788,7 +1863,7 @@ object GoogleContactsSyncManager {
                     }
                 }
 
-                // 3. Birthday parsing with text fallback
+                // 3. Birthday / DOB parsing
                 var dobString = ""
                 val birthdays = conn.optJSONArray("birthdays")
                 if (birthdays != null && birthdays.length() > 0) {
@@ -1868,7 +1943,51 @@ object GoogleContactsSyncManager {
                 }
                 val additionalDatesJson = additionalDatesList.joinToString(";")
 
-                // 9. Membership parsing for group/label mapping to folder
+                // 9. Custom Fields (userDefined, urls, biographies for Instagram, Snapchat, and other custom fields)
+                val customFieldsList = mutableListOf<Pair<String, String>>()
+                val userDefined = conn.optJSONArray("userDefined")
+                if (userDefined != null) {
+                    for (k in 0 until userDefined.length()) {
+                        val ud = userDefined.getJSONObject(k)
+                        val key = ud.optString("key", "").trim()
+                        val value = ud.optString("value", "").trim()
+                        if (key.isNotEmpty() && value.isNotEmpty()) {
+                            customFieldsList.add(key to value)
+                        }
+                    }
+                }
+
+                val urls = conn.optJSONArray("urls")
+                if (urls != null) {
+                    for (u in 0 until urls.length()) {
+                        val uObj = urls.getJSONObject(u)
+                        val valStr = uObj.optString("value", "").trim()
+                        val formattedType = uObj.optString("formattedType", "").trim()
+                        val type = uObj.optString("type", "").trim()
+                        val label = when {
+                            formattedType.isNotEmpty() -> formattedType
+                            type.isNotEmpty() -> type.replaceFirstChar { it.uppercase() }
+                            valStr.contains("instagram.com", ignoreCase = true) -> "Instagram Link"
+                            valStr.contains("snapchat.com", ignoreCase = true) -> "Snapchat Link"
+                            else -> "Website"
+                        }
+                        if (valStr.isNotEmpty() && !customFieldsList.any { it.second == valStr }) {
+                            customFieldsList.add(label to valStr)
+                        }
+                    }
+                }
+
+                val bios = conn.optJSONArray("biographies")
+                if (bios != null && bios.length() > 0) {
+                    val bioVal = bios.getJSONObject(0).optString("value", "").trim()
+                    if (bioVal.isNotEmpty() && !customFieldsList.any { it.first.equals("Notes", ignoreCase = true) }) {
+                        customFieldsList.add("Notes" to bioVal)
+                    }
+                }
+
+                val additionalFieldsJson = com.example.util.ContactSocialHelper.serializeCustomFields(customFieldsList)
+
+                // 10. Membership parsing for group/label mapping to folder
                 var folder = "All"
                 val memberships = conn.optJSONArray("memberships")
                 if (memberships != null) {
@@ -1901,6 +2020,7 @@ object GoogleContactsSyncManager {
                             address = address,
                             jobTitle = jobTitle,
                             anniversaryString = anniversaryString,
+                            additionalFieldsJson = additionalFieldsJson,
                             additionalDatesJson = additionalDatesJson,
                             folder = folder
                         )
@@ -1937,7 +2057,7 @@ object GoogleContactsSyncManager {
         val resourceName = contact.googleContactId ?: return false
         val etag = getEtag(token, resourceName) ?: return false
 
-        val url = "https://people.googleapis.com/v1/$resourceName?updatePersonFields=names,phoneNumbers,birthdays,emailAddresses,addresses,organizations,events,memberships"
+        val url = "https://people.googleapis.com/v1/$resourceName?updatePersonFields=names,phoneNumbers,birthdays,emailAddresses,addresses,organizations,events,memberships,userDefined,urls,biographies"
         val payload = buildContactPayload(contact, groupResourceName).apply {
             put("etag", etag)
         }
@@ -1978,15 +2098,11 @@ object GoogleContactsSyncManager {
         }
     }
 
-    private suspend fun uploadGoogleContactPhoto(context: Context, token: String, resourceName: String, photoUriStr: String): Boolean {
+    suspend fun uploadGoogleContactPhoto(context: Context, token: String, resourceName: String, photoUriStr: String): Boolean {
         try {
-            val uri = Uri.parse(photoUriStr)
-            val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
-            if (inputStream != null) {
-                val bytes = inputStream.readBytes()
-                inputStream.close()
+            val bytes = SystemContactSyncHelper.getContactPhotoBytes(context, photoUriStr)
+            if (bytes != null && bytes.isNotEmpty()) {
                 val base64Str = Base64.encodeToString(bytes, Base64.NO_WRAP)
-
                 val url = "https://people.googleapis.com/v1/$resourceName:updateContactPhoto"
                 val payload = JSONObject().apply {
                     put("photoBytes", base64Str)
@@ -1999,7 +2115,12 @@ object GoogleContactsSyncManager {
                     .build()
 
                 client.newCall(request).execute().use { response ->
-                    return response.isSuccessful
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Successfully uploaded contact photo to Google for $resourceName")
+                        return true
+                    } else {
+                        Log.w(TAG, "Failed to upload contact photo to Google for $resourceName: code=${response.code}")
+                    }
                 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -2117,6 +2238,13 @@ object GoogleContactsSyncManager {
                     })
                 }
                 payload.put("birthdays", birthdaysArray)
+            } else {
+                val birthdaysArray = JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("text", contact.dobString)
+                    })
+                }
+                payload.put("birthdays", birthdaysArray)
             }
         }
 
@@ -2151,6 +2279,73 @@ object GoogleContactsSyncManager {
 
         if (eventsArray.length() > 0) {
             payload.put("events", eventsArray)
+        }
+
+        // Custom fields (userDefined & urls for Instagram / Snapchat / custom links)
+        if (contact.additionalFieldsJson.isNotEmpty()) {
+            val customFields = com.example.util.ContactSocialHelper.parseCustomFields(contact.additionalFieldsJson)
+            val userDefinedArray = JSONArray()
+            val urlsArray = JSONArray()
+            val biosArray = JSONArray()
+
+            for (field in customFields) {
+                val key = field.first.trim()
+                val value = field.second.trim()
+                if (key.isEmpty() || value.isEmpty()) continue
+
+                // Add to userDefined for Google Contacts
+                userDefinedArray.put(JSONObject().apply {
+                    put("key", key)
+                    put("value", value)
+                })
+
+                val recognized = com.example.util.ContactSocialHelper.classifyField(key, value)
+                when (recognized.type) {
+                    com.example.util.ContactSocialHelper.CustomFieldType.INSTAGRAM_ID,
+                    com.example.util.ContactSocialHelper.CustomFieldType.INSTAGRAM_LINK -> {
+                        val targetUrl = recognized.actionUrl ?: value
+                        urlsArray.put(JSONObject().apply {
+                            put("value", targetUrl)
+                            put("type", "custom")
+                            put("formattedType", key.ifEmpty { "Instagram" })
+                        })
+                    }
+                    com.example.util.ContactSocialHelper.CustomFieldType.SNAPCHAT_ID,
+                    com.example.util.ContactSocialHelper.CustomFieldType.SNAPCHAT_LINK -> {
+                        val targetUrl = recognized.actionUrl ?: value
+                        urlsArray.put(JSONObject().apply {
+                            put("value", targetUrl)
+                            put("type", "custom")
+                            put("formattedType", key.ifEmpty { "Snapchat" })
+                        })
+                    }
+                    com.example.util.ContactSocialHelper.CustomFieldType.GENERAL_LINK -> {
+                        urlsArray.put(JSONObject().apply {
+                            put("value", recognized.actionUrl ?: value)
+                            put("type", "custom")
+                            put("formattedType", key)
+                        })
+                    }
+                    com.example.util.ContactSocialHelper.CustomFieldType.TEXT -> {
+                        if (key.equals("Notes", ignoreCase = true) || key.equals("Bio", ignoreCase = true)) {
+                            biosArray.put(JSONObject().apply {
+                                put("value", value)
+                                put("contentType", "TEXT_PLAIN")
+                            })
+                        }
+                    }
+                }
+            }
+
+            if (userDefinedArray.length() > 0) {
+                payload.put("userDefined", userDefinedArray)
+            }
+            if (urlsArray.length() > 0) {
+                payload.put("urls", urlsArray)
+            }
+            if (biosArray.length() > 0) {
+                payload.put("biographies", biosArray)
+            }
         }
 
         val membershipsArray = JSONArray().apply {

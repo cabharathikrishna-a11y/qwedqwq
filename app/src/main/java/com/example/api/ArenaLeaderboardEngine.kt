@@ -194,12 +194,25 @@ object ArenaLeaderboardEngine {
             val leaderboardRoomListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     if (!snapshot.exists()) return
+                    val activeFriendKeys = PeerLiveSphereManager.peerLiveStates.value.keys.map { it.lowercase().trim() }.toSet()
+                    val myCleanEmail = myEmail.lowercase().trim()
+                    val mySanitized = DevicePresenceManager.sanitizeEmail(myEmail)
+
                     for (child in snapshot.children) {
                         val sanitizedKey = child.key ?: continue
                         val rawEmail = child.child("email").getValue(String::class.java)
                             ?: child.child("userEmail").getValue(String::class.java)
                             ?: sanitizedKey
                         val email = rawEmail.lowercase().trim()
+                        val normKey = normalizeEmailKey(email)
+
+                        val isMe = (email == myCleanEmail || sanitizedKey == mySanitized || normKey == myCleanEmail)
+                        val isFriend = activeFriendKeys.contains(normKey) || activeFriendKeys.contains(email) || activeFriendKeys.contains(sanitizedKey) || activeFriendKeys.any { k -> k == normKey || normalizeEmailKey(k) == normKey }
+
+                        // Strictly restrict leaderboard entries to only the current user and friends in Friends Focus
+                        if (!isMe && !isFriend) {
+                            continue
+                        }
 
                         val activeStreak = child.child("ActiveStreak").getValue(Int::class.java) ?: 0
                         val rawName = child.child("displayName").getValue(String::class.java)
@@ -221,13 +234,10 @@ object ArenaLeaderboardEngine {
                         val past30LbMs = child.childMs("Past_30_Days_Focus_Ms", "PAST_30_DAYS/Total_Focus_Ms")
                         val allTimeLbMs = child.childMs("All_Time_Focus_Ms", "ALL_TIME/Total_Focus_Ms")
 
-                        val myCleanEmail = myEmail.lowercase().trim()
-                        val mySanitized = DevicePresenceManager.sanitizeEmail(myEmail)
                         if (email == myCleanEmail || sanitizedKey == mySanitized) {
                             checkAndReconcileLeaderboardDiscrepancy(myEmail, todayLbMs)
                         }
 
-                        val normKey = normalizeEmailKey(email)
                         val existing = rawWeeklyStatsMap[normKey]
                         val updatedTodayMs = todayLbMs
                         val updatedPast7Ms = if (past7LbMs > 0L) past7LbMs else (existing?.past7DaysFocusMs ?: 0L)
@@ -525,8 +535,16 @@ object ArenaLeaderboardEngine {
     private fun computeAndEmitLeaderboard(myEmail: String) {
         computeJob?.cancel()
         computeJob = scope.launch(Dispatchers.Default) {
+            val activeFriendKeys = PeerLiveSphereManager.peerLiveStates.value.keys.map { it.lowercase().trim() }.toSet()
+            val myCleanEmail = myEmail.lowercase().trim()
+            val mySanitized = DevicePresenceManager.sanitizeEmail(myEmail)
+
             val rawList = ArrayList(rawWeeklyStatsMap.values)
                 .filter {
+                    val normEmail = it.email.lowercase().trim()
+                    val isMe = normEmail == myCleanEmail || normEmail == mySanitized
+                    val isFriend = activeFriendKeys.contains(normEmail) || activeFriendKeys.any { k -> k == normEmail || normalizeEmailKey(k) == normEmail }
+                    (isMe || isFriend) &&
                     it.displayName.lowercase() != "guest" &&
                     !it.email.lowercase().contains("guest")
                 }

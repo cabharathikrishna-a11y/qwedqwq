@@ -1221,7 +1221,11 @@ fun SpotifyWebBrowserScreen(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
                             )
-                            WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
+                            WebViewTurboHelper.applyTurboSettings(
+                                this,
+                                isDesktopMode = true,
+                                customUserAgent = WebViewTurboHelper.TURBO_SPOTIFY_WINDOWS_USER_AGENT
+                            )
 
                             // JS Bridge for track metadata callback
                             addJavascriptInterface(

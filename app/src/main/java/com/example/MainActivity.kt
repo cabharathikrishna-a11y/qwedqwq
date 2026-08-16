@@ -206,6 +206,14 @@ class MainActivity : ComponentActivity() {
                             android.util.Log.e("MainActivity", "Auto Google Drive sync failed on open: ${e.message}", e)
                         }
                     }
+
+                    // Schedule Daily Google Contacts sync worker and trigger daily sync check
+                    try {
+                        com.example.worker.DailyContactSyncWorker.scheduleDailySync(applicationContext)
+                        viewModel.checkAndRunDailyGoogleContactsSync(applicationContext)
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Failed to schedule or run daily contacts sync", e)
+                    }
                 } catch (e: Throwable) {
                     e.printStackTrace()
                 }
@@ -2325,24 +2333,45 @@ class MainActivity : ComponentActivity() {
         val componentName = intent.component
         val className = componentName?.className ?: ""
 
-        if (action == Intent.ACTION_SEND) {
+        if (action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE) {
             val flowType = when {
                 className.contains("JournalShareActivity") -> "journal"
                 className.contains("SharedFolderShareActivity") -> "shared_folder"
-                className.contains("PrivateNoteShareActivity") -> "private_note"
+                className.contains("PrivateFolderShareActivity") -> "private_folder"
+                className.contains("NoteShareActivity") || className.contains("PrivateNoteShareActivity") -> "note"
                 else -> null
             }
 
-            val uri = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
-                ?: intent.clipData?.getItemAt(0)?.uri
+            val uris = mutableListOf<android.net.Uri>()
+            if (action == Intent.ACTION_SEND_MULTIPLE) {
+                val list = intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+                if (list != null) {
+                    uris.addAll(list.filterNotNull())
+                }
+            } else {
+                val singleUri = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+                    ?: intent.clipData?.getItemAt(0)?.uri
+                if (singleUri != null) {
+                    uris.add(singleUri)
+                }
+            }
+            intent.clipData?.let { clip ->
+                for (i in 0 until clip.itemCount) {
+                    val u = clip.getItemAt(i)?.uri
+                    if (u != null && !uris.contains(u)) {
+                        uris.add(u)
+                    }
+                }
+            }
+
             val type = intent.type ?: ""
             val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
                 ?: intent.clipData?.getItemAt(0)?.text?.toString()
 
-            if (uri != null) {
+            val names = uris.map { uriItem ->
                 var name = ""
                 try {
-                    contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    contentResolver.query(uriItem, null, null, null, null)?.use { cursor ->
                         val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
                         if (nameIdx != -1 && cursor.moveToFirst()) {
                             name = cursor.getString(nameIdx)
@@ -2352,19 +2381,33 @@ class MainActivity : ComponentActivity() {
                     android.util.Log.e("MainActivity", "Failed to query display name from contentResolver", e)
                 }
                 if (name.isEmpty()) {
-                    name = "shared_file_" + System.currentTimeMillis()
+                    name = uriItem.lastPathSegment ?: ("shared_file_" + System.currentTimeMillis())
                 }
+                name
+            }
 
-                if (flowType != null) {
-                    val data = com.example.ui.SharedFileIntentData(
-                        uri = uri,
-                        name = name,
-                        mimeType = type,
-                        flowType = flowType
-                    )
-                    viewModel.setSharedFileIntent(data)
-                    intent.action = null
-                } else if (className.contains("PdfCompressorAliasActivity") || className.contains("PdfViewerAliasActivity") || type == "application/pdf" || name.endsWith(".pdf", ignoreCase = true)) {
+            if (flowType != null) {
+                val firstUri = uris.firstOrNull() ?: android.net.Uri.EMPTY
+                val firstName = names.firstOrNull() ?: if (!sharedText.isNullOrBlank()) "Shared Content" else "shared_file_${System.currentTimeMillis()}"
+                val data = com.example.ui.SharedFileIntentData(
+                    uri = firstUri,
+                    uris = uris,
+                    name = firstName,
+                    names = names,
+                    mimeType = type,
+                    flowType = flowType,
+                    sharedText = sharedText
+                )
+                viewModel.setSharedFileIntent(data)
+                intent.action = null
+                return
+            }
+
+            val uri = uris.firstOrNull()
+            val name = names.firstOrNull() ?: ("shared_file_" + System.currentTimeMillis())
+
+            if (uri != null) {
+                if (className.contains("PdfCompressorAliasActivity") || className.contains("PdfViewerAliasActivity") || type == "application/pdf" || name.endsWith(".pdf", ignoreCase = true)) {
                     val isCompressor = className.contains("PdfCompressorAliasActivity")
                     viewModel.setTemporaryMediaIntent(
                         com.example.ui.TemporaryMediaViewData(

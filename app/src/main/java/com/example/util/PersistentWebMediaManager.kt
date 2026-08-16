@@ -190,6 +190,7 @@ object PersistentWebMediaManager {
                         _isYoutubeVideoActive.value = false
                     }
                     onPageStartedCallback?.invoke(url)
+                    WebViewTurboHelper.injectSpeedOptimizations(view)
                     if (!isAuthUrl(url)) {
                         view?.evaluateJavascript(antiTubeJs, null)
                     }
@@ -207,6 +208,7 @@ object PersistentWebMediaManager {
                         _isYoutubeVideoActive.value = false
                     }
                     onPageFinishedCallback?.invoke(url)
+                    WebViewTurboHelper.injectSpeedOptimizations(view)
                     if (!isAuthUrl(url)) {
                         view?.evaluateJavascript(antiTubeJs, null)
                     }
@@ -512,7 +514,11 @@ object PersistentWebMediaManager {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
+            WebViewTurboHelper.applyTurboSettings(
+                this,
+                isDesktopMode = true,
+                customUserAgent = WebViewTurboHelper.TURBO_SPOTIFY_WINDOWS_USER_AGENT
+            )
 
             // Bridge to extract live Spotify track info
             addJavascriptInterface(
@@ -537,12 +543,14 @@ object PersistentWebMediaManager {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     onPageStartedCallback?.invoke(url)
+                    WebViewTurboHelper.injectSpeedOptimizations(view)
                     injectSpotifyHelperJs(view)
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     onPageFinishedCallback?.invoke(url)
+                    WebViewTurboHelper.injectSpeedOptimizations(view)
                     injectSpotifyHelperJs(view)
                 }
 
@@ -841,6 +849,243 @@ object PersistentWebMediaManager {
 
     fun setSpotifyFloatingBarVisible(visible: Boolean) {
         _isSpotifyFloatingBarVisible.value = visible
+    }
+
+    /**
+     * Retrieves or creates the single shared Instagram WebView.
+     */
+    @SuppressLint("SetJavaScriptEnabled")
+    fun getOrCreateInstagramWebView(
+        context: Context,
+        reelsBlocked: Boolean = false,
+        storiesBlocked: Boolean = false,
+        messagesBlocked: Boolean = false,
+        exploreBlocked: Boolean = false,
+        notificationsBlocked: Boolean = false,
+        allowSharedReels: Boolean = true,
+        onPageStartedCallback: ((String?) -> Unit)? = null,
+        onPageFinishedCallback: ((String?) -> Unit)? = null
+    ): WebView {
+        val existing = _instagramWebView
+        if (existing != null) {
+            detachFromParent(existing)
+            return existing
+        }
+
+        val homeOrDmUrl = if (reelsBlocked && storiesBlocked) "https://www.instagram.com/direct/inbox/" else "https://www.instagram.com/"
+
+        val webView = WebView(context).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            WebViewTurboHelper.applyTurboSettings(this, isDesktopMode = false)
+
+            val antiGramJs = buildAntiGramScript(
+                reelsBlocked = reelsBlocked,
+                storiesBlocked = storiesBlocked,
+                messagesBlocked = messagesBlocked,
+                exploreBlocked = exploreBlocked,
+                notificationsBlocked = notificationsBlocked,
+                allowSharedReels = allowSharedReels,
+                homeOrDmUrl = homeOrDmUrl
+            )
+
+            webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                    val blocked = WebViewTurboHelper.shouldBlockAdRequest(request)
+                    if (blocked != null) return blocked
+                    return super.shouldInterceptRequest(view, request)
+                }
+
+                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                    super.onPageStarted(view, url, favicon)
+                    onPageStartedCallback?.invoke(url)
+                    WebViewTurboHelper.injectSpeedOptimizations(view)
+                    view?.evaluateJavascript(antiGramJs, null)
+                }
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    onPageFinishedCallback?.invoke(url)
+                    WebViewTurboHelper.injectSpeedOptimizations(view)
+                    view?.evaluateJavascript(antiGramJs, null)
+                }
+
+                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                    super.doUpdateVisitedHistory(view, url, isReload)
+                    view?.evaluateJavascript(antiGramJs, null)
+                }
+
+                override fun onPageCommitVisible(view: WebView?, url: String?) {
+                    super.onPageCommitVisible(view, url)
+                    view?.evaluateJavascript(antiGramJs, null)
+                }
+
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    val targetUrl = request?.url?.toString() ?: ""
+                    if (reelsBlocked && storiesBlocked && (targetUrl == "https://www.instagram.com/" || targetUrl == "https://www.instagram.com")) {
+                        view?.loadUrl("https://www.instagram.com/direct/inbox/")
+                        return true
+                    }
+                    if (reelsBlocked && !allowSharedReels && targetUrl.contains("/reels")) {
+                        view?.loadUrl(homeOrDmUrl)
+                        return true
+                    }
+                    return false
+                }
+            }
+
+            loadUrl(homeOrDmUrl)
+        }
+        _instagramWebView = webView
+        return webView
+    }
+
+    /**
+     * Builds lightweight, high-performance CSS and JS injection for Instagram.
+     * Uses native CSS engine rules (0ms overhead) to eliminate DOM querying bottlenecks.
+     */
+    fun buildAntiGramScript(
+        reelsBlocked: Boolean,
+        storiesBlocked: Boolean,
+        messagesBlocked: Boolean,
+        exploreBlocked: Boolean,
+        notificationsBlocked: Boolean,
+        allowSharedReels: Boolean,
+        homeOrDmUrl: String
+    ): String {
+        return """
+        (function() {
+            var oldStyle = document.getElementById('antigram-styles');
+            if (oldStyle) oldStyle.remove();
+
+            var style = document.createElement('style');
+            style.id = 'antigram-styles';
+            var css = `
+                /* Base performance styling */
+                video { max-height: 100vh !important; }
+                a[href*="threads"], a[href*="meta_ai"], [aria-label*="Threads"], [aria-label*="Meta AI"], svg[aria-label*="Threads"], svg[aria-label*="Meta AI"] {
+                    display: none !important;
+                }
+            `;
+
+            ${if (reelsBlocked) """
+                css += `
+                    a[href*="/reels"],
+                    a[href*="/reel/"],
+                    [aria-label*="Reels"],
+                    [aria-label*="reels"],
+                    svg[aria-label*="Reels"],
+                    svg[aria-label*="reels"],
+                    div[role="tab"]:has(a[href*="/reels"]),
+                    div[role="tab"]:has(a[href*="/reel/"]),
+                    article:has(video),
+                    article:has(a[href*="/reel/"]),
+                    article:has(a[href*="/reels/"]) {
+                        display: none !important;
+                    }
+                `;
+            """ else ""}
+
+            ${if (storiesBlocked) """
+                css += `
+                    a[href*="/stories"],
+                    div[role="menu"]:has(a[href*="/stories"]),
+                    div:has(> a[href*="/stories"]),
+                    ul:has(a[href*="/stories"]) {
+                        display: none !important;
+                    }
+                `;
+            """ else ""}
+
+            ${if (messagesBlocked) """
+                css += `
+                    a[href*="/direct"],
+                    a[aria-label*="Direct"],
+                    a[aria-label*="Messenger"],
+                    svg[aria-label*="Direct"],
+                    svg[aria-label*="Messenger"],
+                    div[role="tab"]:has(a[href*="/direct"]) {
+                        display: none !important;
+                    }
+                `;
+            """ else ""}
+
+            ${if (exploreBlocked) """
+                css += `
+                    a[href*="/explore"],
+                    a[aria-label*="Explore"],
+                    a[aria-label*="Search"],
+                    svg[aria-label*="Explore"],
+                    svg[aria-label*="Search"],
+                    div[role="tab"]:has(a[href*="/explore"]) {
+                        display: none !important;
+                    }
+                `;
+            """ else ""}
+
+            ${if (notificationsBlocked) """
+                css += `
+                    a[href*="/accounts/activity"],
+                    a[href*="/activity"],
+                    a[aria-label*="Notifications"],
+                    a[aria-label*="Activity"],
+                    svg[aria-label*="Notifications"],
+                    svg[aria-label*="Activity Feed"],
+                    svg[aria-label*="Like"],
+                    div[role="tab"]:has(a[href*="/activity"]) {
+                        display: none !important;
+                    }
+                `;
+            """ else ""}
+
+            style.textContent = css;
+            (document.head || document.documentElement).appendChild(style);
+
+            // Fast route guard
+            function checkRoute() {
+                var path = window.location.pathname || '';
+                if (${reelsBlocked && storiesBlocked} && (path === '/' || path === '' || path === '/index.html')) {
+                    window.location.href = 'https://www.instagram.com/direct/inbox/';
+                    return;
+                }
+                if (${reelsBlocked} && !${allowSharedReels} && (path.startsWith('/reels') || path.startsWith('/reel'))) {
+                    window.location.href = '${homeOrDmUrl}';
+                    return;
+                }
+                if (${storiesBlocked} && path.startsWith('/stories')) {
+                    window.location.href = '${homeOrDmUrl}';
+                    return;
+                }
+                if (${exploreBlocked} && path.startsWith('/explore')) {
+                    window.location.href = '${homeOrDmUrl}';
+                    return;
+                }
+                if (${notificationsBlocked} && (path.startsWith('/accounts/activity') || path.startsWith('/activity'))) {
+                    window.location.href = '${homeOrDmUrl}';
+                    return;
+                }
+            }
+
+            checkRoute();
+
+            if (!window.__antigramPatched) {
+                window.__antigramPatched = true;
+                var origPushState = history.pushState;
+                history.pushState = function() {
+                    origPushState.apply(this, arguments);
+                    checkRoute();
+                };
+                var origReplaceState = history.replaceState;
+                history.replaceState = function() {
+                    origReplaceState.apply(this, arguments);
+                    checkRoute();
+                };
+                window.addEventListener('popstate', checkRoute);
+            }
+        })();
+        """.trimIndent()
     }
 
     fun closeYoutube() {

@@ -164,6 +164,7 @@ fun ArenaScreen(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     val activeShields = remember(localShields) { localShields.filter { !it.is_consumed } }
     val consumedShields = remember(localShields) { localShields.filter { it.is_consumed } }
 
+    val allUsers by viewModel.allUsers.collectAsStateWithLifecycle()
     val peerUiCards by viewModel.peerUiCards.collectAsStateWithLifecycle()
     val currentUsername by viewModel.currentUsername.collectAsStateWithLifecycle()
     val userName by viewModel.userName.collectAsStateWithLifecycle()
@@ -220,33 +221,8 @@ fun ArenaScreen(viewModel: AppViewModel, modifier: Modifier = Modifier) {
         baseCompletedMs + localActiveMs
     }
 
-    val filteredPeerUiCards = remember(peerUiCards, myEmail, currentUsername) {
-        val cleanMyEmail = myEmail.lowercase().trim()
-        val cleanMyUsername = currentUsername?.lowercase()?.trim() ?: ""
-        
-        fun normalize(str: String): String {
-            return str.lowercase().replace(".", "").replace("_", "").replace("-", "").replace("@", "").trim()
-        }
-        
-        val normalizedMyEmail = normalize(cleanMyEmail)
-        val normalizedMyUsername = normalize(cleanMyUsername)
-        val sanitizedMyEmail = if (cleanMyEmail.isNotEmpty()) com.example.api.DevicePresenceManager.sanitizeEmail(cleanMyEmail) else ""
-
-        peerUiCards.filter { card ->
-            val peerIdClean = card.peerState.userId.lowercase().trim()
-            val normalizedPeerId = normalize(peerIdClean)
-            
-            val isEmailMatch = cleanMyEmail.isNotEmpty() && (peerIdClean == cleanMyEmail || normalizedPeerId == normalizedMyEmail || peerIdClean == sanitizedMyEmail)
-            val isUsernameMatch = cleanMyUsername.isNotEmpty() && (peerIdClean == cleanMyUsername || normalizedPeerId == normalizedMyUsername)
-            val isMe = isEmailMatch || isUsernameMatch
-            !isMe
-        }
-    }
-
-
-
     val dynamicLeaderboard = remember(
-        filteredPeerUiCards, 
+        allUsers,
         historyRecords, 
         isTimerRunning, 
         isStopwatchActive, 
@@ -256,10 +232,21 @@ fun ArenaScreen(viewModel: AppViewModel, modifier: Modifier = Modifier) {
         leaderboardPeriod, 
         myEmail, 
         myDisplayName, 
+        currentUsername,
         userEmoji,
         leaderboard
     ) {
         val list = mutableListOf<ArenaRankModel>()
+        val cleanMyEmail = myEmail.lowercase().trim()
+        val cleanMyUsername = currentUsername?.lowercase()?.trim() ?: ""
+
+        fun normalize(str: String): String {
+            return str.lowercase().replace(".", "").replace("_", "").replace("-", "").replace("@", "").trim()
+        }
+
+        val normalizedMyEmail = normalize(cleanMyEmail)
+        val normalizedMyUsername = normalize(cleanMyUsername)
+        val sanitizedMyEmail = if (cleanMyEmail.isNotEmpty()) com.example.api.DevicePresenceManager.sanitizeEmail(cleanMyEmail) else ""
 
         // 1. Calculate activeSessionMs for me
         val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
@@ -269,9 +256,7 @@ fun ArenaScreen(viewModel: AppViewModel, modifier: Modifier = Modifier) {
             localActiveMs = accumulatedSessionTimeMs
         }
 
-        val currentDeviceKey = com.example.util.DeviceIdProvider.getDeviceId(context)
         val myRankModel = leaderboard.find { it.isMe }
-        val myLeaderboardTodayMs = myRankModel?.todayFocusMs ?: 0L
 
         // 2. Calculate "my" total ms for the selected period
         val myTotalMs = when (leaderboardPeriod) {
@@ -297,20 +282,9 @@ fun ArenaScreen(viewModel: AppViewModel, modifier: Modifier = Modifier) {
             }
         }
 
-        val myAllTimeMs = run {
-            val localAllTimeMs = historyRecords.sumOf { it.total_focus_ms }
-            val myAllTimeLeaderboardMs = if (leaderboardPeriod == "ALL_TIME") (myRankModel?.totalFocusMs ?: 0L) else 0L
-            maxOf(localAllTimeMs, myAllTimeLeaderboardMs)
-        }
         val myLocalStreak = com.example.api.AnalyticsVaultEngine.calculateDailyConsistencyStreak(context, historyRecords)
         val myStreak = if (myLocalStreak > 0) myLocalStreak else (myRankModel?.activeStreak ?: 0)
         val myTopSub = myRankModel?.topSubject ?: "None"
-        val myTodayFocusMs = run {
-            val completedTodaySecs = com.example.util.FocusTimerManager.focusRecords.value.sumOf { com.example.util.FocusTimerManager.getOverlapSecondsForDate(it, todayStr) }
-            val pendingSecs = com.example.util.FocusTimerManager.pendingFocusReview.value?.let { com.example.util.FocusTimerManager.getOverlapSecondsForDate(it, todayStr) } ?: 0
-            val localCompletedMs = (completedTodaySecs + pendingSecs) * 1000L
-            localCompletedMs + localActiveMs
-        }
         val myXp = myRankModel?.xpScore ?: com.example.api.ArenaLeaderboardEngine.calculateXp(myTotalMs, myStreak)
 
         list.add(
@@ -326,41 +300,67 @@ fun ArenaScreen(viewModel: AppViewModel, modifier: Modifier = Modifier) {
             )
         )
 
-        // 3. Add other peers
-        filteredPeerUiCards.forEach { card ->
-            val peer = card.peerState
-            val activeSessionFocusMs = com.example.api.TimelineSyncEngine.calculateAccumulatedFocusMs(peer.timeline, peer.status)
-            val matchedLeaderboardPeer = leaderboard.find { it.email.lowercase().trim() == peer.userId.lowercase().trim() }
-            val peerLeaderboardTodayMs = matchedLeaderboardPeer?.todayFocusMs ?: 0L
-
-            val peerTotalMs = when (leaderboardPeriod) {
-                "TODAY" -> {
-                    if (matchedLeaderboardPeer != null && matchedLeaderboardPeer.todayFocusMs > 0L) matchedLeaderboardPeer.todayFocusMs else (peer.todayFocusMs + activeSessionFocusMs)
-                }
-                else -> {
-                    if (matchedLeaderboardPeer != null && matchedLeaderboardPeer.totalFocusMs > 0L) matchedLeaderboardPeer.totalFocusMs else (peer.todayFocusMs + activeSessionFocusMs)
-                }
-            }
-
-            val peerAllTimeMs = if (matchedLeaderboardPeer != null && matchedLeaderboardPeer.totalFocusMs > 0L) matchedLeaderboardPeer.totalFocusMs else (peer.todayFocusMs + activeSessionFocusMs)
-
-            val streakToUse = matchedLeaderboardPeer?.activeStreak ?: 0
-            val subToUse = matchedLeaderboardPeer?.topSubject ?: "None"
-            val peerTodayFocusMs = if (matchedLeaderboardPeer != null && matchedLeaderboardPeer.todayFocusMs > 0L) matchedLeaderboardPeer.todayFocusMs else (peer.todayFocusMs + activeSessionFocusMs)
-            val peerXp = matchedLeaderboardPeer?.xpScore ?: com.example.api.ArenaLeaderboardEngine.calculateXp(peerTotalMs, streakToUse)
-
-            list.add(
-                ArenaRankModel(
-                    email = peer.userId,
-                    displayName = peer.displayName,
-                    totalFocusMs = peerTotalMs,
-                    activeStreak = streakToUse,
-                    xpScore = peerXp,
-                    topSubject = subToUse,
-                    isMe = false,
-                    customEmoji = peer.customEmoji ?: "👤"
-                )
+        // 3. Add friends strictly from allUsers (matching Friends Focus Details)
+        allUsers.forEach { (usernameKey, peerState) ->
+            val isMe = com.example.api.DevicePresenceManager.isMeUser(
+                key = usernameKey,
+                userId = peerState.userId,
+                myEmail = cleanMyEmail,
+                myUsername = cleanMyUsername
             )
+
+            if (!isMe && usernameKey.lowercase().trim() != "admin") {
+                val peerEmail = peerState.userId.ifEmpty { usernameKey }
+                val normPeerEmail = normalize(peerEmail)
+                val normKey = normalize(usernameKey)
+
+                val matchedLeaderboardPeer = leaderboard.find { lb ->
+                    val normLbEmail = normalize(lb.email)
+                    normLbEmail == normPeerEmail || normLbEmail == normKey ||
+                    lb.displayName.equals(peerState.displayName, ignoreCase = true) ||
+                    lb.displayName.equals(peerState.nickname, ignoreCase = true)
+                }
+
+                val activeSessionFocusMs = com.example.api.TimelineSyncEngine.calculateAccumulatedFocusMs(peerState.timeline, peerState.status)
+                val peerTodayMs = if (matchedLeaderboardPeer != null && matchedLeaderboardPeer.todayFocusMs > 0L) {
+                    matchedLeaderboardPeer.todayFocusMs
+                } else if (com.example.util.TimeEngine.isUpdatedToday(peerState.lastUpdated)) {
+                    peerState.todayFocusMs + activeSessionFocusMs
+                } else {
+                    activeSessionFocusMs
+                }
+
+                val peerTotalMs = when (leaderboardPeriod) {
+                    "TODAY" -> peerTodayMs
+                    else -> {
+                        if (matchedLeaderboardPeer != null && matchedLeaderboardPeer.totalFocusMs > 0L) {
+                            matchedLeaderboardPeer.totalFocusMs
+                        } else {
+                            peerState.todayFocusMs + activeSessionFocusMs
+                        }
+                    }
+                }
+
+                val streakToUse = matchedLeaderboardPeer?.activeStreak ?: 0
+                val subToUse = matchedLeaderboardPeer?.topSubject ?: "None"
+                val peerXp = matchedLeaderboardPeer?.xpScore ?: com.example.api.ArenaLeaderboardEngine.calculateXp(peerTotalMs, streakToUse)
+                val nameToShow = if (!peerState.nickname.isNullOrBlank()) peerState.nickname!! else if (!peerState.displayName.isNullOrBlank()) peerState.displayName!! else if (!peerState.name.isNullOrBlank()) peerState.name!! else usernameKey
+                val emojiToShow = if (!peerState.customEmoji.isNullOrBlank()) peerState.customEmoji!! else if (!peerState.emoji.isNullOrBlank()) peerState.emoji!! else "👤"
+
+                list.add(
+                    ArenaRankModel(
+                        email = peerEmail,
+                        displayName = nameToShow,
+                        totalFocusMs = peerTotalMs,
+                        activeStreak = streakToUse,
+                        xpScore = peerXp,
+                        topSubject = subToUse,
+                        isMe = false,
+                        customEmoji = emojiToShow,
+                        todayFocusMs = peerTodayMs
+                    )
+                )
+            }
         }
 
         // 4. Sort and assign ranks with strict deduplication by email AND displayName
@@ -759,16 +759,15 @@ fun ArenaScreen(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                         }
                     }
 
-                    // Podium Section (Adaptive size matching study group size, min 4)
+                    // Podium Section (Showing only active friends from Friends Focus and myself)
                     if (dynamicLeaderboard.isNotEmpty()) {
                         item {
-                            val podiumSize = if (dynamicLeaderboard.size < 4) 4 else dynamicLeaderboard.size
-                            val topN = dynamicLeaderboard.take(podiumSize)
+                            val topN = dynamicLeaderboard
                             Box(
                                 modifier = Modifier.fillMaxWidth(),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Box(modifier = Modifier.widthIn(max = if (podiumSize > 4) 650.dp else 500.dp)) {
+                                Box(modifier = Modifier.widthIn(max = if (topN.size > 4) 650.dp else 500.dp)) {
                                     ArenaPodium(
                                         topN = topN,
                                         viewModel = viewModel,
@@ -1459,7 +1458,7 @@ fun ArenaScreen(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     }
 }
 
-data class PodiumSpot(val rank: Int, val peer: ArenaRankModel?)
+data class PodiumSpot(val rank: Int, val peer: ArenaRankModel)
 
 @Composable
 fun ArenaPodium(
@@ -1471,10 +1470,9 @@ fun ArenaPodium(
 ) {
     val podiumOrder = remember(topN) {
         val list = java.util.LinkedList<PodiumSpot>()
-        // We want a minimum of 4 spots, or the study group size (topN.size)
-        val maxRank = if (topN.size < 4) 4 else topN.size
-        for (rank in 1..maxRank) {
-            val peer = if (rank <= topN.size) topN[rank - 1] else null
+        for (index in topN.indices) {
+            val rank = index + 1
+            val peer = topN[index]
             val spot = PodiumSpot(rank, peer)
             if (rank == 1) {
                 list.add(spot)
@@ -1547,8 +1545,8 @@ fun ArenaPodium(
                         )
                     )
                     .border(
-                        width = if (peer?.isMe == true) 2.dp else 1.dp,
-                        brush = if (peer?.isMe == true) {
+                        width = if (peer.isMe) 2.dp else 1.dp,
+                        brush = if (peer.isMe) {
                             Brush.linearGradient(listOf(Color(0xFF00C853), Color(0xFF00E676)))
                         } else {
                             Brush.linearGradient(listOf(medalColor.copy(alpha = 0.6f), Color.Transparent))
@@ -1558,141 +1556,109 @@ fun ArenaPodium(
                     .padding(8.dp),
                 contentAlignment = Alignment.BottomCenter
             ) {
-                if (peer != null) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)
-                    ) {
-                        // Badge / Rank Label
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 2.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(medalColor.copy(alpha = 0.2f))
-                                .border(1.dp, medalColor.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = rankText,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = medalColor
-                              )
-                        }
-
-                        // Initials Avatar
-                        LaunchedEffect(peer.email) {
-                            if (!viewModel.firestoreAvatars.containsKey(peer.email)) {
-                                viewModel.fetchUserAvatarFromFirestore(peer.email)
-                            }
-                        }
-
-                        val resolvedEmoji = remember(peer.customEmoji) {
-                            if (!peer.customEmoji.isNullOrEmpty()) {
-                                peer.customEmoji
-                            } else {
-                                "👤"
-                            }
-                        }
-                        val avatarSize = if (rank == 1) 46.dp else if (rank == 2) 40.dp else 36.dp
-                        val avatarFontSize = if (rank == 1) 14.sp else if (rank == 2) 12.sp else 11.sp
-                        UserAvatar(
-                            emojiOrBase64 = resolvedEmoji,
-                            size = avatarSize,
-                            fontSize = avatarFontSize,
-                            fallback = peer.displayName.take(2).uppercase(),
-                            modifier = Modifier.border(1.5.dp, medalColor, CircleShape)
-                        )
-
-                        // User Info
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
-                        ) {
-                            Text(
-                                text = peer.displayName,
-                                fontSize = if (rank == 1) 13.sp else 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (peer.isMe) Color(0xFF00C853) else Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center
-                            )
-
-                            Text(
-                                text = formatFocusMsToHours(peer.totalFocusMs),
-                                fontSize = if (rank == 1) 11.sp else 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.LightGray
-                            )
-
-                            Spacer(modifier = Modifier.height(2.dp))
-
-                            Text(
-                                text = "${peer.xpScore} XP",
-                                fontSize = if (rank == 1) 11.sp else 10.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (peer.xpScore < 0) Color(0xFFEF4444) else Color(0xFFFFB300)
-                            )
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                if (peer.activeStreak > 0) {
-                                    Text(
-                                        text = "🔥 ${peer.activeStreak}d",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFFF7043)
-                                    )
-                                }
-
-                                if (peer.isMe && activeShields.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.Shield,
-                                        contentDescription = "Shield Active",
-                                        tint = Color(0xFF03A9F4),
-                                        modifier = Modifier
-                                            .size(12.dp)
-                                            .clickable { onShowShieldsBottomSheet() }
-                                      )
-                                }
-                            }
-
-                            // Gift button removed from podium/bar graph
-                        }
-                    }
-                } else {
-                    // Empty Podium Spot
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxSize()
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)
+                ) {
+                    // Badge / Rank Label
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(medalColor.copy(alpha = 0.2f))
+                            .border(1.dp, medalColor.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = rankText,
-                            fontSize = 12.sp,
-                            color = Color.DarkGray,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Invite Partner",
-                            tint = Color.DarkGray,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Unoccupied",
                             fontSize = 10.sp,
-                            color = Color.DarkGray,
+                            fontWeight = FontWeight.Bold,
+                            color = medalColor
+                        )
+                    }
+
+                    // Initials Avatar
+                    LaunchedEffect(peer.email) {
+                        if (!viewModel.firestoreAvatars.containsKey(peer.email)) {
+                            viewModel.fetchUserAvatarFromFirestore(peer.email)
+                        }
+                    }
+
+                    val resolvedEmoji = remember(peer.customEmoji) {
+                        if (!peer.customEmoji.isNullOrEmpty()) {
+                            peer.customEmoji
+                        } else {
+                            "👤"
+                        }
+                    }
+                    val avatarSize = if (rank == 1) 46.dp else if (rank == 2) 40.dp else 36.dp
+                    val avatarFontSize = if (rank == 1) 14.sp else if (rank == 2) 12.sp else 11.sp
+                    UserAvatar(
+                        emojiOrBase64 = resolvedEmoji,
+                        size = avatarSize,
+                        fontSize = avatarFontSize,
+                        fallback = peer.displayName.take(2).uppercase(),
+                        modifier = Modifier.border(1.5.dp, medalColor, CircleShape)
+                    )
+
+                    // User Info
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
+                    ) {
+                        Text(
+                            text = peer.displayName,
+                            fontSize = if (rank == 1) 13.sp else 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (peer.isMe) Color(0xFF00C853) else Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center
                         )
+
+                        Text(
+                            text = formatFocusMsToHours(peer.totalFocusMs),
+                            fontSize = if (rank == 1) 11.sp else 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.LightGray
+                        )
+
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        Text(
+                            text = "${peer.xpScore} XP",
+                            fontSize = if (rank == 1) 11.sp else 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (peer.xpScore < 0) Color(0xFFEF4444) else Color(0xFFFFB300)
+                        )
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (peer.activeStreak > 0) {
+                                Text(
+                                    text = "🔥 ${peer.activeStreak}d",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFFF7043)
+                                )
+                            }
+
+                            if (peer.isMe && activeShields.isNotEmpty()) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Shield,
+                                    contentDescription = "Shield Active",
+                                    tint = Color(0xFF03A9F4),
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clickable { onShowShieldsBottomSheet() }
+                                )
+                            }
+                        }
                     }
                 }
             }

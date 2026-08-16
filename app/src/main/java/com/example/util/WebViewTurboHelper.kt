@@ -24,11 +24,15 @@ object WebViewTurboHelper {
 
     // Modern Android Chrome Mobile User-Agent for fast mobile bundles
     const val TURBO_MOBILE_USER_AGENT =
-        "Mozilla/5.0 (Linux; Android 14; Mobile; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+        "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36"
 
     // Modern Chrome Desktop User-Agent when desktop view is explicitly needed
     const val TURBO_DESKTOP_USER_AGENT =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+
+    // High-performance Windows Desktop User-Agent specifically tailored for Spotify Web Player
+    const val TURBO_SPOTIFY_WINDOWS_USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
     // High-performance HashSet of ad, tracking, and analytics domains for O(1) subresource blocking
     private val BLOCKED_AD_HOST_SNIPPETS = hashSetOf(
@@ -55,11 +59,30 @@ object WebViewTurboHelper {
         "youtube.com/pagead/",
         "youtube.com/api/stats/ads",
         "youtube.com/ptracking",
-        "youtube.com/get_midroll_info"
+        "youtube.com/get_midroll_info",
+        "youtube.com/api/stats/playback",
+        "youtube.com/api/stats/watchtime",
+        "google-analytics.com",
+        "googletagmanager.com/gtm.js",
+        "connect.facebook.net/signals/",
+        "graph.instagram.com/logging_client_events",
+        "analytics.instagram.com",
+        "facebook.net/en_US/fbevents.js",
+        "static.doubleclick.net"
     )
 
-    private val EMPTY_RESPONSE by lazy {
-        WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
+    private val EMPTY_OK_RESPONSE by lazy {
+        WebResourceResponse(
+            "text/javascript",
+            "UTF-8",
+            200,
+            "OK",
+            mapOf(
+                "Access-Control-Allow-Origin" to "*",
+                "Cache-Control" to "max-age=86400, public"
+            ),
+            ByteArrayInputStream(ByteArray(0))
+        )
     }
 
     /**
@@ -105,6 +128,12 @@ object WebViewTurboHelper {
             loadsImagesAutomatically = true
             blockNetworkImage = false
 
+            // Performance and layout acceleration
+            setGeolocationEnabled(false)
+            saveFormData = false
+            savePassword = false
+            layoutAlgorithm = WebSettings.LayoutAlgorithm.NORMAL
+
             // Viewport & layout engine acceleration
             useWideViewPort = true
             loadWithOverviewMode = true
@@ -147,7 +176,7 @@ object WebViewTurboHelper {
         // Fast domain check
         for (snippet in BLOCKED_AD_HOST_SNIPPETS) {
             if (lowerUrl.contains(snippet)) {
-                return EMPTY_RESPONSE
+                return EMPTY_OK_RESPONSE
             }
         }
 
@@ -170,10 +199,20 @@ object WebViewTurboHelper {
                             wrapper.innerHTML = `
                                 <link rel="dns-prefetch" href="//fonts.googleapis.com">
                                 <link rel="dns-prefetch" href="//fonts.gstatic.com">
+                                <link rel="dns-prefetch" href="//m.youtube.com">
+                                <link rel="dns-prefetch" href="//www.youtube.com">
                                 <link rel="dns-prefetch" href="//i.ytimg.com">
                                 <link rel="dns-prefetch" href="//yt3.ggpht.com">
+                                <link rel="dns-prefetch" href="//googlevideo.com">
+                                <link rel="dns-prefetch" href="//www.instagram.com">
+                                <link rel="dns-prefetch" href="//static.cdninstagram.com">
+                                <link rel="dns-prefetch" href="//scontent.cdninstagram.com">
                                 <link rel="dns-prefetch" href="//i.scdn.co">
                                 <link rel="dns-prefetch" href="//audio-ak-spotify-com.akamaized.net">
+                                <link rel="dns-prefetch" href="//spclient.wg.spotify.com">
+                                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                                <link rel="preconnect" href="https://i.ytimg.com">
+                                <link rel="preconnect" href="https://static.cdninstagram.com">
                             `;
                             head.appendChild(wrapper);
                         }

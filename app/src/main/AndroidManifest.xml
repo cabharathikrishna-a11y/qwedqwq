@@ -225,6 +225,7 @@
             android:icon="@mipmap/ic_launcher">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
             </intent-filter>
@@ -238,6 +239,35 @@
             android:icon="@mipmap/ic_launcher">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".PrivateFolderShareActivity"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:label="Life OS - Private Folder"
+            android:icon="@mipmap/ic_launcher">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".NoteShareActivity"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:label="Life OS - Note"
+            android:icon="@mipmap/ic_launcher">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
             </intent-filter>
@@ -247,10 +277,11 @@
             android:name=".PrivateNoteShareActivity"
             android:targetActivity=".MainActivity"
             android:exported="true"
-            android:label="Life OS - Private Note"
+            android:label="Life OS - Note"
             android:icon="@mipmap/ic_launcher">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
             </intent-filter>

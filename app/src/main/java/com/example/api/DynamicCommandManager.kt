@@ -303,11 +303,14 @@ object DynamicCommandManager {
 
             val clientElapsedMs = com.example.util.FocusTimerManager.accumulatedSessionTimeMs.value
 
+            val tabSelection = if (timerMode.lowercase() == "stopwatch") "stopwatch" else "pomodoro"
             val payload = if (statusStr == "IDLE") {
                 mapOf<String, Any?>(
                     "Command_Device_Name" to "None",
                     "Status" to "IDLE",
                     "Timer_Mode" to null,
+                    "Selected_Timer_Tab" to if (com.example.util.FocusTimerManager.isTabFocusTimerSelected.value) "pomodoro" else "stopwatch",
+                    "Tab_Origin_Device" to myDevice,
                     "Session_ID" to null,
                     "Current_Task" to null,
                     "Current_Tag" to null,
@@ -319,6 +322,8 @@ object DynamicCommandManager {
                     "Command_Device_Name" to myDevice,
                     "Status" to statusStr,
                     "Timer_Mode" to timerMode,
+                    "Selected_Timer_Tab" to tabSelection,
+                    "Tab_Origin_Device" to myDevice,
                     "Session_ID" to sessionId,
                     "Current_Task" to currentTask,
                     "Current_Tag" to currentTag,
@@ -463,7 +468,20 @@ object DynamicCommandManager {
                     }
                 }
 
-                val fingerprint = "$statusStr|$timerMode|$currentTask|$currentTag|${timelineList.size}|${timelineList.lastOrNull()?.timestamp}"
+                // Also check if remote device updated Selected_Timer_Tab
+                val selectedTab = snapshot.child("Selected_Timer_Tab").getValue(String::class.java)
+                val tabOriginDevice = snapshot.child("Tab_Origin_Device").getValue(String::class.java) ?: ""
+                if (!selectedTab.isNullOrBlank() && tabOriginDevice != myDevice) {
+                    val shouldBePomodoro = selectedTab.equals("pomodoro", ignoreCase = true)
+                    val hasLocalActiveTimer = com.example.util.FocusTimerManager.isTimerRunning.value ||
+                        com.example.util.FocusTimerManager.isStopwatchActive.value ||
+                        com.example.util.FocusTimerManager.isPaused.value
+                    if (!hasLocalActiveTimer && !isRemoteActive) {
+                        com.example.util.FocusTimerManager.setTabFocusTimerSelected(shouldBePomodoro, syncRemote = false)
+                    }
+                }
+
+                val fingerprint = "$statusStr|$timerMode|$selectedTab|$currentTask|$currentTag|${timelineList.size}|${timelineList.lastOrNull()?.timestamp}"
                 if (fingerprint == lastCalibratedFingerprint) {
                     Log.d(TAG, "Active focus timer snapshot fingerprint unchanged ($fingerprint). Skipping redundant calibration.")
                     return
@@ -560,7 +578,13 @@ object DynamicCommandManager {
             }
 
             if (!hasLocalActive && !isRemoteActive) {
-                Log.d(TAG, "forceReadActiveFocusTimerAndCalibrate: Both local and remote are IDLE. Skipping calibration.")
+                val selectedTab = snapshot.child("Selected_Timer_Tab").getValue(String::class.java)
+                val tabOriginDevice = snapshot.child("Tab_Origin_Device").getValue(String::class.java) ?: ""
+                if (!selectedTab.isNullOrBlank() && tabOriginDevice != myDevice) {
+                    val shouldBePomodoro = selectedTab.equals("pomodoro", ignoreCase = true)
+                    com.example.util.FocusTimerManager.setTabFocusTimerSelected(shouldBePomodoro, syncRemote = false)
+                }
+                Log.d(TAG, "forceReadActiveFocusTimerAndCalibrate: Both local and remote are IDLE. Skipping session calibration.")
                 return@addOnSuccessListener
             }
 
@@ -973,6 +997,34 @@ object DynamicCommandManager {
         } finally {
             com.example.util.FocusTimerManager.isPassiveCalibrationInProgress = false
             com.example.widget.WidgetManager.updateAllWidgets(context)
+        }
+    }
+
+    fun syncSelectedTimerTab(context: Context, isPomodoro: Boolean) {
+        val email = activeEmail.ifEmpty {
+            context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE).getString("user_email", "") ?: ""
+        }
+        if (email.isBlank()) return
+        try {
+            val dbUrl = FirebaseConfig.getDatabaseUrl(context)
+            if (dbUrl.isEmpty()) return
+            val database = FirebaseDatabase.getInstance(dbUrl)
+            val sanitizedEmail = DevicePresenceManager.sanitizeEmail(email)
+            val activeRef = database.getReference("FOCUS_TIMMER")
+                .child("USER")
+                .child(sanitizedEmail)
+                .child("ACTIVE_FOCUS_TIMER")
+            val myDevice = com.example.util.DeviceIdProvider.getDeviceId(context)
+            val tabStr = if (isPomodoro) "pomodoro" else "stopwatch"
+            val payload = mapOf<String, Any?>(
+                "Selected_Timer_Tab" to tabStr,
+                "Tab_Origin_Device" to myDevice,
+                "Last_Tab_Updated" to ServerValue.TIMESTAMP
+            )
+            activeRef.updateChildren(payload)
+            Log.d(TAG, "Successfully synced selected timer tab '$tabStr' to Firebase RTDB for multi-device sync.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error syncing selected timer tab to Firebase RTDB", e)
         }
     }
 }
